@@ -31,13 +31,21 @@ jobs:
 
       - run: npm ci
       - run: npm run stage
+      # Whole-genome ENCODE thymus peak files for the Peek view (3.9 MB, hash-checked
+      # against bench/manifest.json).
+      - run: npm run stage:peek
       - run: npm run vendor
 
       - name: Assemble site
         run: |
-          mkdir -p _site/man
+          mkdir -p _site/man _site/test
           cp -r index.html src vendor examples _site/
           cp -r man/figures _site/man/
+          # The hand-worked fixture is also a selectable dataset in the page.
+          cp -r test/fixtures _site/test/
+
+      - name: Every offered dataset is in the site
+        run: node scripts/check-site.mjs _site
 
       - uses: actions/upload-pages-artifact@v3
         with:
