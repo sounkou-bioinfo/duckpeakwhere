@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { openBrowser } from "../test/browser.js";
+import { assertW2 } from "./w2-counts.mjs";
 
 const [input, output] = process.argv.slice(2);
 const request = JSON.parse(await readFile(input, "utf8"));
@@ -50,6 +51,7 @@ try {
   result.chromium = page.context().browser().version();
   result.counts_centre = Object.fromEntries(result.result.results.map((r) => [r.label, r.counts]));
   result.unmatched = Object.fromEntries(result.result.results.map((r) => [r.label, r.peaks.unmatched]));
+  if (request.annotation.includes("/W2/")) assertW2(result.counts_centre);
   result.request = request;
   await writeFile(`${output}.tmp`, JSON.stringify(result));
   await rename(`${output}.tmp`, output);

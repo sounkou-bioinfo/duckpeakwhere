@@ -4,7 +4,22 @@
 <script type="module">
   import { openDatabase } from "../src/db.js";
   import { annotate } from "../src/annotate.js";
+  import { peek } from "../src/peek.js";
+  import { createSession } from "../src/session.js";
   const ready = openDatabase();
+  const queries = [], plans = [];
+  const session = ready.then(({ conn }) => createSession({ async query(sql) {
+    queries.push(sql);
+    if (sql.includes("FROM peek_bin_grid b LEFT JOIN") || sql.includes("covered AS MATERIALIZED")) {
+      plans.push({ kind: sql.includes("peek_bin_grid") ? "histogram" : "bp",
+        plan: (await conn.query(`EXPLAIN (FORMAT JSON) ${sql}`)).toArray().map((r) => r.explain_value).join("\n") });
+    }
+    return conn.query(sql);
+  } }));
+  window.runSession = async (view, request) => (await session).run(view, request);
+  window.clearSession = async () => (await session).clear();
+  window.takeQueries = () => queries.splice(0);
+  window.takePlans = () => plans.splice(0);
   window.annotateUrls = async (request) => {
     const { conn } = await ready;
     const absolute = (u) => new URL(u, location.href).href;
@@ -28,11 +43,25 @@
     };
     await db.registerFileBuffer("registered.bed", new Uint8Array(await blob.arrayBuffer()));
     const core = (await conn.query("SELECT count(*) AS n FROM read_csv('registered.bed', comment = '#')")).toArray();
-    return {
-      coreReader: Number(core[0].n),
-      registered: await attempt("registered.bed"),
-      blobUrl: await attempt(URL.createObjectURL(blob)),
-    };
+    const url = URL.createObjectURL(blob);
+    try {
+      return {
+        coreReader: Number(core[0].n),
+        registered: await attempt("registered.bed"),
+        blobUrl: await attempt(url),
+      };
+    } finally {
+      URL.revokeObjectURL(url);
+      await db.dropFile("registered.bed");
+    }
+  };
+  window.runPeek = async (request) => {
+    const { conn } = await ready;
+    return peek(conn, request);
+  };
+  window.query = async (sql) => {
+    const { conn } = await ready;
+    return (await conn.query(sql)).toArray().map((row) => row.toJSON());
   };
   window.databaseInfo = async () => {
     const { conn, platform, version } = await ready;

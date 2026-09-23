@@ -6,6 +6,7 @@ const vendor = new URL("../vendor/", import.meta.url);
 
 /** @returns {Promise<{db: duckdb.AsyncDuckDB, conn: duckdb.AsyncDuckDBConnection, platform: string, version: string}>} */
 export async function openDatabase() {
+  const dev = new URLSearchParams(location.search).get("duckhts") === "dev";
   const bundle = await duckdb.selectBundle({
     mvp: {
       mainModule: new URL("duckdb/duckdb-mvp.wasm", vendor).href,
@@ -18,10 +19,10 @@ export async function openDatabase() {
   });
   const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), new Worker(bundle.mainWorker));
   await db.instantiate(bundle.mainModule);
-  // Signed extensions only: the DuckHTS builds in vendor/duckhts are the community ones.
-  await db.open({ allowUnsignedExtensions: false });
+  // Only the explicit development switch admits the pinned unsigned build.
+  await db.open({ allowUnsignedExtensions: dev });
   const conn = await db.connect();
-  const { platform } = await loadDuckhts(conn, { baseUrl: new URL("duckhts/", vendor).href });
+  const { platform } = await loadDuckhts(conn, { baseUrl: new URL(dev ? "duckhts-dev/" : "duckhts/", vendor).href });
   const version = String((await conn.query("SELECT version() AS v")).toArray()[0].v);
   return { db, conn, platform, version };
 }

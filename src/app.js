@@ -1,7 +1,10 @@
-// Page wiring: pick bundled files, run the SQL annotation, draw the result.
+// One file selection and database, two SQL analyses: Where and Peek.
 import * as Plot from "../vendor/plot.js";
 import { openDatabase } from "./db.js";
-import { annotate, CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
+import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
+import { CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
+import { createSession } from "./session.js";
+import { drawPeek } from "./peek-view.js";
 
 /** Bundled datasets, served from this origin. */
 export const DATASETS = {
@@ -28,9 +31,55 @@ export const DATASETS = {
     },
   },
 };
+DATASETS.thymusFull = {
+  name: "Mouse thymus, whole genome (Peek; ENCODE)",
+  annotations: {},
+  peaks: Object.fromEntries(Object.entries(DATASETS.thymus.peaks)
+    .map(([label, path]) => [label, path.replace("examples/", "vendor/peek-examples/").replace(".chr19", "")])),
+};
 
 const COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#65a30d", "#9ca3af"];
 const $ = (id) => document.getElementById(id);
+const LOCAL_UNSUPPORTED = "This signed DuckHTS build cannot read local files (blob: URLs). Use bundled examples, or stage the pinned development build and open ?duckhts=dev. See DuckHTS #246 / PR #248.";
+let localAnnotation = null;
+let localPeaks = [];
+let localSupported = false;
+let session, reset = Promise.resolve();
+const sources = new Map();
+
+function releaseRemovedFiles() {
+  const selected = new Set([localAnnotation, ...localPeaks]);
+  for (const [file, source] of sources) {
+    if (!selected.has(file)) {
+      source.revoke();
+      sources.delete(file);
+    }
+  }
+}
+
+function clearLocalFiles() {
+  localAnnotation = null;
+  localPeaks = [];
+  releaseRemovedFiles();
+  if (session) reset = reset.then(() => session.clear());
+  $("local-annotation").value = "";
+  $("local-peaks").value = "";
+  $("annotation-name").textContent = "No annotation selected";
+  $("peak-names").textContent = "No peak files selected";
+  $("output").hidden = true;
+}
+
+function selectFiles(kind, files) {
+  if (kind === "annotation") {
+    localAnnotation = files[0] ?? null;
+    $("annotation-name").textContent = localAnnotation?.name ?? "No annotation selected";
+  } else {
+    localPeaks = [...files];
+    $("peak-names").textContent = localPeaks.map((f) => f.name).join(", ") || "No peak files selected";
+  }
+  releaseRemovedFiles();
+  $("output").hidden = true;
+}
 
 function option(value, text) {
   const el = document.createElement("option");
@@ -40,6 +89,11 @@ function option(value, text) {
 }
 
 function showDataset(key) {
+  $("bundled-files").hidden = key === "local";
+  $("local-files").hidden = key !== "local";
+  $("output").hidden = true;
+  if (key === "local") return;
+  clearLocalFiles();
   const dataset = DATASETS[key];
   $("annotation").replaceChildren(
     ...Object.entries(dataset.annotations).map(([name, url]) => option(url, name)),
@@ -57,14 +111,41 @@ function showDataset(key) {
   );
 }
 
+function showView() {
+  const isPeek = $("view").value === "peek";
+  for (const id of ["where-settings", "bundled-annotation", "annotation-drop", "where-results"]) $(id).hidden = isPeek;
+  $("where-settings").disabled = isPeek;
+  $("peek-help").hidden = !isPeek;
+  $("peek-results").hidden = !isPeek;
+  $("output").hidden = true;
+  $("run").textContent = isPeek ? "Peek at peaks" : "Annotate peaks";
+  $("dataset").querySelector('[value="thymusFull"]').disabled = !isPeek;
+  if (!isPeek && $("dataset").value === "thymusFull") {
+    $("dataset").value = "thymus";
+    showDataset("thymus");
+  }
+}
+
 function request() {
-  const peaks = [...$("peaks").querySelectorAll("input:checked")].map((box) => ({
-    url: new URL(box.value, location.href).href,
-    label: box.dataset.label,
-  }));
+  const isLocal = $("dataset").value === "local";
+  const isPeek = $("view").value === "peek";
+  if (isLocal && !localSupported) throw new Error(LOCAL_UNSUPPORTED);
+  if (isLocal && !isPeek && !localAnnotation) throw new Error("Choose an annotation file.");
+  const url = (file) => {
+    if (!sources.has(file)) sources.set(file, localFileUrl(file));
+    return sources.get(file).url;
+  };
+  const peaks = isLocal
+    ? localPeaks.map((file) => ({ url: url(file), label: file.name }))
+    : [...$("peaks").querySelectorAll("input:checked")].map((box) => ({
+      url: new URL(box.value, location.href).href,
+      label: box.dataset.label,
+    }));
   if (peaks.length === 0) throw new Error("Choose at least one peak file.");
+  if (isPeek) return { peaks };
   return {
-    annotation: new URL($("annotation").value, location.href).href,
+    annotation: isLocal ? url(localAnnotation) : new URL($("annotation").value, location.href).href,
+    annotationName: isLocal ? localAnnotation.name : $("annotation").value,
     peaks,
     settings: {
       promoterUpstream: Number($("up").value),
@@ -100,7 +181,9 @@ function draw({ results, background, meta, warnings }) {
     `${meta.assembly ? `, ${meta.assembly}` : ""}).`;
   const hidden = results
     .filter((r) => !r.drawn)
-    .map((r) => `${r.label}: not drawn, because more than 5% of its peaks are on chromosomes the annotation lacks.`);
+    .map((r) => `${r.label}: not drawn, ${r.error ? "because the file could not be read" :
+      r.peaks.matched + r.peaks.unmatched === 0 ? "because it has no accepted peaks" :
+      "because more than 5% of its peaks are on chromosomes the annotation lacks"}.`);
   $("warnings").replaceChildren(
     ...[...hidden, ...warnings].map((w) => {
       const li = document.createElement("li");
@@ -109,26 +192,56 @@ function draw({ results, background, meta, warnings }) {
     }),
   );
 
-  const head = `<tr><th>File</th>${CATEGORIES.map((c) => `<th>${CATEGORY_LABELS[c]}</th>`).join("")}<th>Unmatched</th></tr>`;
-  const row = (r) =>
-    `<tr data-label="${r.label}"><th>${r.label}</th>${CATEGORIES.map((c) => `<td data-category="${c}">${r.counts[c].toLocaleString("en")}</td>`).join("")}` +
-    `<td data-category="unmatched">${r.background ? "" : r.unmatched.toLocaleString("en")}</td></tr>`;
-  $("table").innerHTML = head + [...results, ...(background ? [background] : [])].map(row).join("");
+  $("table").replaceChildren();
+  const head = $("table").insertRow();
+  for (const text of ["File", ...CATEGORIES.map((c) => CATEGORY_LABELS[c]), "Unmatched"]) {
+    const cell = document.createElement("th");
+    cell.textContent = text;
+    head.append(cell);
+  }
+  for (const r of [...results, ...(background ? [background] : [])]) {
+    const row = $("table").insertRow();
+    row.dataset.label = r.label;
+    const name = document.createElement("th");
+    name.textContent = r.label;
+    row.append(name);
+    for (const c of [...CATEGORIES, "unmatched"]) {
+      const cell = row.insertCell();
+      cell.dataset.category = c;
+      cell.textContent = c === "unmatched" ? (r.background ? "" : r.unmatched.toLocaleString("en")) : r.counts[c].toLocaleString("en");
+    }
+  }
   $("output").hidden = false;
 }
 
 async function main() {
-  $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)));
+  $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);
+  showView();
+  $("view").addEventListener("change", showView);
+  $("clear-files").addEventListener("click", clearLocalFiles);
+  for (const kind of ["annotation", "peaks"]) {
+    $(kind === "annotation" ? "local-annotation" : "local-peaks").addEventListener("change", (event) => selectFiles(kind, event.target.files));
+    const drop = $(`${kind}-drop`);
+    drop.addEventListener("dragover", (event) => event.preventDefault());
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      if (!$("files").disabled) selectFiles(kind, event.dataTransfer.files);
+    });
+  }
 
   let conn;
   try {
     const opened = await openDatabase();
     conn = opened.conn;
-    $("status").textContent = `DuckDB ${opened.version} (${opened.platform}) with DuckHTS loaded.`;
+    session = createSession(conn);
+    localSupported = await supportsLocalFiles(conn);
+    $("local-status").textContent = localSupported ? "Local files are read in this tab; nothing is uploaded." : LOCAL_UNSUPPORTED;
+    $("status").textContent = `DuckDB ${opened.version} (${opened.platform}) with DuckHTS loaded.` +
+      (new URLSearchParams(location.search).get("duckhts") === "dev" ? " Development build: unsigned extensions enabled." : "");
     $("run").disabled = false;
-    $("run").textContent = "Annotate peaks";
+    showView();
   } catch (error) {
     $("status").textContent = `Could not start DuckDB with DuckHTS: ${error.message}`;
     $("run").textContent = "Unavailable";
@@ -138,16 +251,30 @@ async function main() {
   $("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     $("run").disabled = true;
-    $("status").textContent = "Annotating…";
+    $("files").disabled = true;
+    $("view").disabled = true;
+    $("where-settings").disabled = true;
+    $("output").hidden = true;
+    delete document.body.dataset.state;
+    const isPeek = $("view").value === "peek";
+    $("status").textContent = isPeek ? "Checking peaks…" : "Annotating…";
     const started = performance.now();
     try {
-      draw(await annotate(conn, request()));
+      await reset;
+      const input = request();
+      const result = await session.run(isPeek ? "peek" : "where", input);
+      if (isPeek) drawPeek(result);
+      else draw(result);
+      $("output").hidden = false;
       $("status").textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)} s.`;
       document.body.dataset.state = "done";
     } catch (error) {
       $("status").textContent = error.message;
       document.body.dataset.state = "error";
     } finally {
+      $("files").disabled = false;
+      $("view").disabled = false;
+      $("where-settings").disabled = isPeek;
       $("run").disabled = false;
     }
   });

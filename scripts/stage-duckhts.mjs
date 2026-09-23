@@ -1,6 +1,6 @@
 // Download the signed DuckHTS wasm builds named in duckhts-manifest.json into
 // vendor/duckhts/<platform>/, refusing any file whose sha256 differs from the manifest.
-// This is the only script that touches the network; the app itself never does.
+// Extension downloads belong in staging scripts; the app stays on its own origin.
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 

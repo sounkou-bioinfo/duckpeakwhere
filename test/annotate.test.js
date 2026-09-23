@@ -64,10 +64,9 @@ test("chromosome names match without the chr prefix", async () => {
   assert.deepEqual(results[0].counts, pick(expected.counts_centre));
 });
 
-// Known limitation, https://github.com/RGenomicsETL/duckhts/issues/246: htslib opens
-// paths itself, so it can't see files registered with duckdb-wasm, and it has no
-// handler for blob: URLs. When this test fails, dropped files can be supported.
-test("DuckHTS cannot yet read registered files or blob: URLs", async () => {
+// The signed release's transport limit: https://github.com/RGenomicsETL/duckhts/issues/246.
+// Fails when the signed build gains blob support, so its pin and warning can be reviewed.
+test("signed DuckHTS cannot read registered files or blob: URLs", async () => {
   const probe = await page.evaluate((p) => window.probeLocalFile(p), fixture("peaks.bed"));
   assert.equal(probe.coreReader, 17, "DuckDB's own reader sees the registered file");
   assert.equal(probe.registered.ok, false);

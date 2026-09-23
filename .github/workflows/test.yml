@@ -26,9 +26,12 @@ jobs:
 
       - run: npm ci
 
-      # The only network step: the DuckHTS wasm builds, checked against
-      # duckhts-manifest.json.  vendor/ is then assembled offline.
+      # Extension downloads are hash-checked against the signed and dev manifests.
       - run: npm run stage
+      - run: npm run stage:dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: npm run stage:peek
       - run: npm run vendor
 
       - run: npx playwright-core install --with-deps chromium
