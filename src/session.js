@@ -3,6 +3,17 @@ import { annotate, clearAnnotation } from "./annotate.js";
 import { peek, clearPeek } from "./peek.js";
 import { createPeakStore } from "./peaks.js";
 
+// Conservative: ambiguous scripts are treated as writes. The three cgranges probes
+// are read-only; every other cgranges call may change an index.
+function changesState(sql) {
+  const statement = sql.trim().replace(/;\s*$/, "");
+  return !/^(?:SELECT|WITH|FROM|SHOW|DESCRIBE|SUMMARIZE|EXPLAIN)\b/i.test(statement) ||
+    statement.includes(";") ||
+    /\b(?:INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|COPY|CALL|ATTACH|DETACH|TRUNCATE|MERGE|SET|RESET|PRAGMA)\b/i.test(statement) ||
+    /\bEXPLAIN\s+ANALYZE\b/i.test(statement) ||
+    /\bduckhts_cgranges_(?!overlaps_list\b|count_overlaps\b|has_overlap\b)[a-z_]+\s*\(/i.test(statement);
+}
+
 export function createSession(conn) {
   const cache = {}, peaks = createPeakStore(conn);
   let pending = Promise.resolve(), invalidated = false, live = {};
@@ -35,9 +46,8 @@ export function createSession(conn) {
     },
     query(sql) {
       return serial(() => {
-        // SELECT can mutate DuckHTS indexes; a statement-prefix check is insufficient.
-        // Leave tables available for exploration, then rebuild on the next analysis.
-        invalidated = true;
+        // Leave tables available for exploration; rebuild only after possible writes.
+        invalidated ||= changesState(sql);
         return conn.query(sql);
       });
     },

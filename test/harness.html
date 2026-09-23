@@ -21,6 +21,7 @@
   window.runSql = async (sql) => (await sqlConsole).runQuery(sql);
   window.sqlExamples = async (selection) => (await sqlConsole).examples({ ...selection, live: (await session).context() });
   window.runSession = async (view, request) => (await session).run(view, request);
+  window.sessionQuery = async (sql) => (await session).query(sql);
   window.clearSession = async () => (await session).clear();
   window.takeQueries = () => queries.splice(0);
   window.takePlans = () => plans.splice(0);
