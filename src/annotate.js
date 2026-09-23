@@ -11,7 +11,9 @@
 
 import { readPeaks, peakWarnings } from "./peaks.js";
 
-export const CATEGORIES = ["promoter", "utr5", "utr3", "exon", "intron", "intergenic"];
+export const CATEGORIES = ["promoter", "utr5", "utr3", "exon", "intron", "downstream", "intergenic"];
+
+export const categoriesFor = (settings) => CATEGORIES.filter((c) => c !== "downstream" || settings.downstreamEnabled);
 
 export const CATEGORY_LABELS = {
   promoter: "Promoter",
@@ -19,6 +21,7 @@ export const CATEGORY_LABELS = {
   utr3: "3′ UTR",
   exon: "Exon",
   intron: "Intron",
+  downstream: "Downstream",
   intergenic: "Intergenic",
 };
 
@@ -27,6 +30,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   promoterDownstream: 1000,
   mode: "centre", // "centre" | "bp"
   proteinCodingOnly: false,
+  downstreamEnabled: false,
+  downstreamWindow: 1000,
 });
 
 /** A file with more than this fraction of unmatched peaks is not drawn. */
@@ -155,7 +160,8 @@ WHERE t.id IN (SELECT tx FROM part WHERE kind = 'exon');`;
  * at intron priority: every exonic base of the transcript is already claimed by a
  * higher-priority exon, UTR or promoter interval, so what's left of the span is intron.
  */
-function categorySql({ promoterUpstream: up, promoterDownstream: down, proteinCodingOnly }) {
+function categorySql({ promoterUpstream: up, promoterDownstream: down, proteinCodingOnly,
+  downstreamEnabled, downstreamWindow }) {
   const txFilter = proteinCodingOnly ? "WHERE biotype = 'protein_coding'" : "";
   return `
 CREATE OR REPLACE TEMP TABLE used_tx AS SELECT * FROM tx ${txFilter};
@@ -182,7 +188,13 @@ SELECT ckey, s, e, CASE kind WHEN 'utr5' THEN ${PRIORITY.utr5} ELSE ${PRIORITY.u
 UNION ALL
 SELECT ckey, s, e, ${PRIORITY.exon} FROM p WHERE kind = 'exon'
 UNION ALL
-SELECT ckey, s, e, ${PRIORITY.intron} FROM used_tx;`;
+SELECT ckey, s, e, ${PRIORITY.intron} FROM used_tx
+${downstreamEnabled && downstreamWindow > 0 ? `UNION ALL
+SELECT ckey,
+       CASE WHEN strand = '-' THEN greatest(0, s - ${downstreamWindow}) ELSE e END,
+       CASE WHEN strand = '-' THEN s ELSE e + ${downstreamWindow} END,
+       ${PRIORITY.downstream}
+FROM used_tx WHERE strand <> '-' OR s > 0` : ""};`;
 }
 
 /**
@@ -215,7 +227,8 @@ FROM piece WHERE e IS NOT NULL`,
 }
 
 /** Counts per category for one peak file: peak centres or peak base pairs. */
-function peakCountSql(fid, partitionIndex, mode) {
+function peakCountSql(fid, partitionIndex, settings) {
+  const { mode } = settings;
   const peaks = `
 WITH marked AS (
   SELECT *, ckey IN (SELECT ckey FROM annotation_contig) AS matched
@@ -225,7 +238,7 @@ WITH marked AS (
       duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, c, c + 1), h -> h.label::INTEGER)),
       ${PRIORITY.intergenic})`;
   if (mode === "bp") {
-    const genic = CATEGORIES.filter((c) => c !== "intergenic");
+    const genic = categoriesFor(settings).filter((c) => c !== "intergenic");
     return `${peaks}, covered AS MATERIALIZED (
   SELECT s, e, duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e) AS hits
   FROM marked WHERE matched
@@ -268,8 +281,8 @@ UNION ALL
 SELECT -1, (SELECT sum(length) FROM len)::BIGINT`;
 }
 
-function countsFrom(rows) {
-  const counts = Object.fromEntries(CATEGORIES.map((c) => [c, 0]));
+function countsFrom(rows, settings) {
+  const counts = Object.fromEntries(categoriesFor(settings).map((c) => [c, 0]));
   const extra = {};
   for (const { priority, n } of rows) {
     if (priority > 0) counts[CATEGORIES[priority - 1]] += Number(n ?? 0);
@@ -298,6 +311,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
   const settings = { ...DEFAULT_SETTINGS, ...given };
   nonNegativeInt(settings.promoterUpstream, "Promoter upstream");
   nonNegativeInt(settings.promoterDownstream, "Promoter downstream");
+  nonNegativeInt(settings.downstreamWindow, "Post-TES downstream window");
   if (!["centre", "bp"].includes(settings.mode)) throw new Error(`Unknown mode: ${settings.mode}`);
 
   const rows = async (sql) => (await conn.query(sql)).toArray().map((r) => r.toJSON());
@@ -339,7 +353,8 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
         warnings.push("The annotation has no transcript_type, gene_type or Ensembl biotype, so every transcript was kept.");
       }
     }
-    const categoryKey = JSON.stringify([settings.promoterUpstream, settings.promoterDownstream, settings.proteinCodingOnly]);
+    const categoryKey = JSON.stringify([settings.promoterUpstream, settings.promoterDownstream, settings.proteinCodingOnly,
+      settings.downstreamEnabled, settings.downstreamEnabled ? settings.downstreamWindow : 0]);
     if (cache.categoryKey !== categoryKey) {
       if (cache.partitionIndex) await conn.query(`SELECT duckhts_cgranges_destroy(${lit(cache.partitionIndex)})`);
       await run(categorySql(settings));
@@ -358,10 +373,10 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
     for (const file of files) {
       const { fid, label, error, rejected, rejectedCount } = file;
       warnings.push(...peakWarnings(file));
-      const { counts, extra } = countsFrom(await rows(peakCountSql(fid, partitionIndex, settings.mode)));
+      const { counts, extra } = countsFrom(await rows(peakCountSql(fid, partitionIndex, settings)), settings);
       const matchedPeaks = extra[-1];
       const unmatchedPeaks = extra[-2];
-      const matched = CATEGORIES.reduce((n, c) => n + counts[c], 0);
+      const matched = Object.values(counts).reduce((n, value) => n + value, 0);
       const unmatchedChroms = (
         await rows(`SELECT DISTINCT trim(raw_chrom) AS chrom FROM peak
           WHERE fid = ${fid} AND reason IS NULL
@@ -387,7 +402,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
     const [{ known }] = await rows(`SELECT count(*) AS known FROM chrom_length`);
     if (Number(known) > 0) {
       if (!cache.background) {
-        const { counts, extra } = countsFrom(await rows(backgroundSql()));
+        const { counts, extra } = countsFrom(await rows(backgroundSql()), settings);
         cache.background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
       }
       background = cache.background;

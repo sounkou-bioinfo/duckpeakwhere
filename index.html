@@ -71,6 +71,8 @@
           </select>
         </label>
         <label class="inline"><input id="coding" type="checkbox"> Protein-coding transcripts only</label>
+        <label class="inline"><input id="downstream-enabled" type="checkbox"> Include Downstream (past TES)</label>
+        <label>Post-TES window (bp) <input id="downstream-window" type="number" min="0" step="1" value="1000"></label>
       </fieldset>
 
       <button id="run" type="submit" disabled>Starting DuckDB…</button>
@@ -83,6 +85,8 @@
         <p id="summary" class="note"></p>
         <ul id="warnings"></ul>
         <div class="scroll"><table id="table"></table></div>
+        <button id="where-tsv" type="button">Download summary TSV</button>
+        <button id="where-svg" type="button">Download chart SVG</button>
       </div>
       <div id="peek-results" hidden>
         <h2>Peek summary</h2>

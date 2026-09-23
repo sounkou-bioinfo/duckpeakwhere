@@ -2,9 +2,9 @@
 import * as Plot from "../vendor/plot.js";
 import { openDatabase } from "./db.js";
 import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
-import { CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
+import { CATEGORIES, CATEGORY_LABELS, DEFAULT_SETTINGS, categoriesFor } from "./annotate.js";
 import { createSession } from "./session.js";
-import { drawPeek } from "./peek-view.js";
+import { drawPeek, download } from "./peek-view.js";
 
 /** Bundled datasets, served from this origin. */
 export const DATASETS = {
@@ -38,7 +38,7 @@ DATASETS.thymusFull = {
     .map(([label, path]) => [label, path.replace("examples/", "vendor/peek-examples/").replace(".chr19", "")])),
 };
 
-const COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#65a30d", "#9ca3af"];
+const COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#65a30d", "#c026d3", "#9ca3af"];
 const $ = (id) => document.getElementById(id);
 const LOCAL_UNSUPPORTED = "This signed DuckHTS build cannot read local files (blob: URLs). Use bundled examples, or stage the pinned development build and open ?duckhts=dev. See DuckHTS #246 / PR #248.";
 let localAnnotation = null;
@@ -152,15 +152,18 @@ function request() {
       promoterDownstream: Number($("down").value),
       mode: $("mode").value,
       proteinCodingOnly: $("coding").checked,
+      downstreamEnabled: $("downstream-enabled").checked,
+      downstreamWindow: Number($("downstream-window").value),
     },
   };
 }
 
 function draw({ results, background, meta, warnings }) {
+  const categories = categoriesFor(meta.settings);
   const bars = [...results.filter((r) => r.drawn), ...(background ? [background] : [])];
-  const total = (r) => CATEGORIES.reduce((n, c) => n + r.counts[c], 0);
+  const total = (r) => categories.reduce((n, c) => n + r.counts[c], 0);
   const data = bars.flatMap((r) =>
-    CATEGORIES.map((c) => ({ bar: r.label, category: CATEGORY_LABELS[c], share: r.counts[c] / (total(r) || 1) })),
+    categories.map((c) => ({ bar: r.label, category: CATEGORY_LABELS[c], share: r.counts[c] / (total(r) || 1) })),
   );
   $("chart").replaceChildren(
     Plot.plot({
@@ -169,8 +172,8 @@ function draw({ results, background, meta, warnings }) {
       marginLeft: 90,
       x: { label: "Share", percent: true, domain: [0, 100] },
       y: { label: null, domain: bars.map((r) => r.label) },
-      color: { domain: CATEGORIES.map((c) => CATEGORY_LABELS[c]), range: COLORS, legend: true },
-      marks: [Plot.barX(data, { x: "share", y: "bar", fill: "category", order: CATEGORIES.map((c) => CATEGORY_LABELS[c]), tip: true })],
+      color: { domain: categories.map((c) => CATEGORY_LABELS[c]), range: categories.map((c) => COLORS[CATEGORIES.indexOf(c)]), legend: true },
+      marks: [Plot.barX(data, { x: "share", y: "bar", fill: "category", order: categories.map((c) => CATEGORY_LABELS[c]), tip: true })],
     }),
   );
 
@@ -178,9 +181,13 @@ function draw({ results, background, meta, warnings }) {
   const { promoterUpstream: up, promoterDownstream: down } = meta.settings;
   $("summary").textContent =
     `Counting ${unit}; promoter ${up} bp upstream to ${down} bp downstream of the TSS; ` +
-    `priority ${CATEGORIES.map((c) => CATEGORY_LABELS[c]).join(" > ")}; ` +
+    (meta.settings.downstreamEnabled ? `Downstream ${meta.settings.downstreamWindow} bp past TES; ` : "") +
+    `priority ${categories.map((c) => CATEGORY_LABELS[c]).join(" > ")}; ` +
     `${meta.transcripts.toLocaleString()} transcripts (${meta.format.toUpperCase()}` +
     `${meta.assembly ? `, ${meta.assembly}` : ""}).`;
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+  title.textContent = $("summary").textContent;
+  $("chart").querySelector("svg").prepend(title);
   const hidden = results
     .filter((r) => !r.drawn)
     .map((r) => `${r.label}: not drawn, ${r.error ? "because the file could not be read" :
@@ -196,7 +203,7 @@ function draw({ results, background, meta, warnings }) {
 
   $("table").replaceChildren();
   const head = $("table").insertRow();
-  for (const text of ["File", ...CATEGORIES.map((c) => CATEGORY_LABELS[c]), "Unmatched"]) {
+  for (const text of ["File", ...categories.map((c) => CATEGORY_LABELS[c]), "Unmatched"]) {
     const cell = document.createElement("th");
     cell.textContent = text;
     head.append(cell);
@@ -207,16 +214,27 @@ function draw({ results, background, meta, warnings }) {
     const name = document.createElement("th");
     name.textContent = r.label;
     row.append(name);
-    for (const c of [...CATEGORIES, "unmatched"]) {
+    for (const c of [...categories, "unmatched"]) {
       const cell = row.insertCell();
       cell.dataset.category = c;
       cell.textContent = c === "unmatched" ? (r.background ? "" : r.unmatched.toLocaleString("en")) : r.counts[c].toLocaleString("en");
     }
   }
+  $("where-tsv").onclick = () => {
+    const lines = [["File", ...categories.map((c) => CATEGORY_LABELS[c]), "Unmatched"],
+      ...[...results, ...(background ? [background] : [])].map((r) =>
+        [r.label, ...categories.map((c) => r.counts[c]), r.background ? "" : r.unmatched])];
+    download("where-summary.tsv", lines.map((row) => row.map((v) => String(v).replace(/[\t\r\n]/g, " ")).join("\t")).join("\n") + "\n",
+      "text/tab-separated-values");
+  };
+  $("where-svg").onclick = () => download("where-chart.svg",
+    new XMLSerializer().serializeToString($("chart").querySelector("svg")), "image/svg+xml");
   $("output").hidden = false;
 }
 
 async function main() {
+  $("downstream-enabled").checked = DEFAULT_SETTINGS.downstreamEnabled;
+  $("downstream-window").value = DEFAULT_SETTINGS.downstreamWindow;
   $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);

@@ -30,7 +30,7 @@ function table(target, columns, rows) {
     }
   }
 }
-function download(name, data, type) {
+export function download(name, data, type) {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const link = document.createElement("a");
   link.href = url;
