@@ -270,7 +270,7 @@ SELECT priority, count(*)::BIGINT AS n FROM (
 UNION ALL SELECT -1, count(*) FILTER (matched) FROM marked
 UNION ALL SELECT -2, count(*) FILTER (NOT matched) FROM marked
 UNION ALL SELECT -3, count(*) FILTER (NOT matched) FROM marked
-${useSummits ? `UNION ALL SELECT -4, count(*) FILTER (NOT (${validSummit})) FROM marked` : ""}`;
+${useSummits ? `UNION ALL SELECT -4, count(*) FILTER (NOT (${validSummit})) FROM marked WHERE matched` : ""}`;
 }
 
 // UCSC chrom.sizes is tab-separated. Check lengths before reducing normalized

@@ -54,6 +54,20 @@ test("narrowPeak summit offsets include zero and exclude the end; invalid offset
   assert.deepEqual(runs.formats[2].results[0].counts, summit);
 });
 
+test("unmatched chromosomes do not contribute summit fallbacks", async () => {
+  const result = await page.evaluate(async () => {
+    await window.clearSession();
+    const base = `${location.origin}/test/fixtures/`;
+    return window.runSession("where", { annotation: `${base}gene-types.gtf`,
+      peaks: [{ url: `${base}summits-unmatched.narrowPeak`, label: "summits" }],
+      settings: { promoterUpstream: 0, promoterDownstream: 0, useSummits: true } });
+  });
+  assert.deepEqual(result.results[0].counts, summit);
+  assert.equal(result.results[0].peaks.unmatched, 1);
+  assert.equal(result.results[0].summitFallbacks, 5);
+  assert.match(result.warnings.join("\n"), /5 peak\(s\).*midpoint/);
+});
+
 test("signed read_bed exposes narrowPeak column 10 as block_count", async () => {
   const offsets = await page.evaluate(async () => (await window.query(
     `SELECT block_count FROM read_bed('${location.origin}/test/fixtures/summits.narrowPeak', scan_mode := 'sequential')`
