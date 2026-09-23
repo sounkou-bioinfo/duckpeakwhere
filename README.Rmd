@@ -93,19 +93,24 @@ the session, so changing a setting re-counts rather than re-reads.
 
 ## Try the SQL
 
-Run **Where** on a dataset, then open the **SQL console** below the results.
-Paste either query into the console and click **Run**:
+The tables behind each run stay live. Open the **SQL console** under the results and
+query them, or call DuckHTS on your files directly. Each example chip replays one
+finding: Ensembl biotypes, a transcript_id reused across chromosomes, GTF 2.2's UTR
+names, a multi-member gzip read to its last row.
 
 ```sql
-SELECT count(*) AS transcripts FROM tx;
+-- The genome partition, straight from the cut points.
+SELECT priority, count(*) AS pieces, sum(e - s) AS bp
+FROM segment GROUP BY priority ORDER BY priority;
 ```
 
 ```sql
-SELECT fid, count(*) AS peaks FROM peak WHERE reason IS NULL GROUP BY fid ORDER BY fid;
+-- What the protein-coding filter sees, whichever naming the annotation uses.
+SELECT biotype, count(*) AS transcripts
+FROM tx GROUP BY biotype ORDER BY transcripts DESC;
 ```
 
-The first reads Where's transcript table; the second counts accepted peaks by file ID.
-**Show the SQL** beneath each view's results lists the statements used for that run.
+**Show the SQL** under each result lists every statement that run executed, in order.
 
 ## The same SQL, outside the browser
 
@@ -180,21 +185,9 @@ attribute parsing, and is being closed in DuckHTS rather than here
 Choose **Local files** and pick or drop an annotation and peak files. They are read in
 place through `blob:` URLs, never uploaded.
 
-For annotations without `##sequence-region` lengths, select a **chrom.sizes** file
-to show the Genome background bar; clearing the file removes it. The file has two
-tab-separated columns (chromosome and positive integer length), without a header.
-DuckDB reads it locally; contig names are matched through `duckhts_contig_key`.
-Only contigs present in the annotation contribute to the Genome bar. Annotation
-header lengths take precedence; peak counts and chromosome matching are unchanged.
-
-**Downstream** is off by default. When enabled, its window extends past the TES:
-forward on the positive strand, backward on the negative strand. Its priority is
-below Intron and above Intergenic (Promoter > 5′ UTR > 3′ UTR > Exon > Intron >
-Downstream > Intergenic).
-
-Using **narrowPeak** summit positions for centre counting is off by default.
-A missing or out-of-range summit falls back to the peak midpoint. BED and broadPeak
-centres, and base-pair counting, are unaffected.
+An annotation without `##sequence-region` lines (every GTF) has no Genome bar; add a
+chrom.sizes file to get one. The optional Where settings (Downstream, narrowPeak
+summits, chrom.sizes) and their exact rules are in [`docs/where.md`](docs/where.md).
 
 Reading `blob:` URLs needs a DuckHTS release that includes it (merged, not yet
 released). Until then the page says so, and `?duckhts=dev` loads a pinned development
