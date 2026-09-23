@@ -7,7 +7,7 @@ import { openBrowser } from "./browser.js";
 const expected = JSON.parse(await readFile(new URL("./fixtures/expected.json", import.meta.url), "utf8"));
 const CATEGORIES = ["promoter", "utr5", "utr3", "exon", "intron", "intergenic"];
 
-// Peak-centre counts from test/oracle.py, an independent brute-force implementation.
+// Peak-centre counts from test/oracle.R, an independent brute-force implementation.
 const thymus = JSON.parse(await readFile(new URL("./fixtures/thymus-expected.json", import.meta.url), "utf8"));
 
 // Peak counts per file, from examples/README.md (counted when the files were cut).

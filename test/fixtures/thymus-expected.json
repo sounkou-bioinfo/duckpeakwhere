@@ -1,5 +1,5 @@
 {
-  "_comment": "Peak-centre counts from test/oracle.py, promoter 1000/1000, all transcripts.",
+  "_comment": "Peak-centre counts from test/oracle.R, promoter 1000/1000, all transcripts.",
   "counts_centre": {
     "CTCF": {
       "promoter": 360,

@@ -4,6 +4,10 @@
 //
 // Coordinates are 0-based half-open throughout; read_gff/read_gtf report GFF's 1-based
 // closed `start`, so `start - 1` is the only base change.
+//
+// Every file is read whole, so readers use scan_mode := 'sequential': htslib streams the
+// file without probing for a .tbi/.csi index, which in the browser would be wasted
+// same-origin requests.
 
 export const CATEGORIES = ["promoter", "utr5", "utr3", "exon", "intron", "intergenic"];
 
@@ -68,7 +72,7 @@ function featureSql(format, url) {
 CREATE OR REPLACE TEMP TABLE feature AS
 SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
        lower(feature) AS type, ${kind} AS kind, attributes_map AS a
-FROM ${reader}(${lit(url)}, attributes_map := true);`;
+FROM ${reader}(${lit(url)}, attributes_map := true, scan_mode := 'sequential');`;
 
   if (format === "gtf") {
     return `${common}
@@ -176,7 +180,7 @@ function peakCountSql(url, partitionIndex, mode) {
   const peaks = `
 WITH peak AS (
   SELECT chrom, duckhts_contig_key(chrom) AS ckey, start AS s, "end" AS e
-  FROM read_bed(${lit(url)})
+  FROM read_bed(${lit(url)}, scan_mode := 'sequential')
 ), marked AS (
   SELECT *, ckey IN (SELECT DISTINCT ckey FROM feature) AS matched FROM peak
 )`;
@@ -301,7 +305,7 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
       const unmatchedPeaks = extra[-2];
       const matched = CATEGORIES.reduce((n, c) => n + counts[c], 0);
       const unmatchedChroms = (
-        await rows(`SELECT DISTINCT chrom FROM read_bed(${lit(url)})
+        await rows(`SELECT DISTINCT chrom FROM read_bed(${lit(url)}, scan_mode := 'sequential')
           WHERE duckhts_contig_key(chrom) NOT IN (SELECT DISTINCT ckey FROM feature) ORDER BY chrom`)
       ).map((r) => r.chrom);
       const total = matchedPeaks + unmatchedPeaks;
@@ -326,7 +330,7 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
       const { counts, extra } = countsFrom(await rows(backgroundSql()));
       background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
       for (const { url, label } of peaks) {
-        const [{ past }] = await rows(`SELECT count(*) AS past FROM read_bed(${lit(url)}) b
+        const [{ past }] = await rows(`SELECT count(*) AS past FROM read_bed(${lit(url)}, scan_mode := 'sequential') b
           JOIN chrom_length l ON l.ckey = duckhts_contig_key(b.chrom) WHERE b."end" > l.length`);
         if (Number(past) > 0) {
           warnings.push(`${label}: ${past} peak(s) extend past their chromosome's end. Is this the right genome build?`);

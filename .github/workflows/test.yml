@@ -20,6 +20,10 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
       - run: npm ci
 
       # The only network step: the DuckHTS wasm builds, checked against
@@ -30,10 +34,10 @@ jobs:
       - run: npx playwright-core install --with-deps chromium
 
       # The committed thymus expectations must be exactly what the independent
-      # oracle produces.
+      # base-R oracle produces.
       - name: Oracle output is up to date
         run: |
-          python3 test/oracle.py > /dev/null
+          Rscript test/oracle.R
           git diff --exit-code test/fixtures/thymus-expected.json
 
       - run: npm test
