@@ -1,5 +1,5 @@
 // PeakPeek's BED-family statistics: DuckHTS readers/overlap kernels, SQL reductions.
-// Compatibility: README.Rmd, PeakPeek SPEC §4 and ADRs 0001/0003/0004/0006/0007/0011.
+// Rules and PeakPeek compatibility: README.Rmd.
 import { readPeaks } from "./peaks.js";
 const rows = async (conn, sql) => (await conn.query(sql)).toArray().map((row) =>
   Object.fromEntries(Object.entries(row.toJSON()).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])));
@@ -51,7 +51,7 @@ export async function peek(conn, { peaks }, { files } = {}) {
       ORDER BY CASE WHEN try_cast(chrom AS DOUBLE) IS NOT NULL THEN 0 WHEN chrom = 'X' THEN 1
         WHEN chrom = 'Y' THEN 2 WHEN chrom = 'MT' THEN 3 ELSE 4 END, try_cast(chrom AS DOUBLE), chrom, fid`);
 
-    // ADR-0006: shared 30 log-spaced bins, [from,to), with the maximum in the last bin.
+    // 30 log-spaced bins shared by all files, [from,to), with the maximum in the last bin.
     await conn.query(`CREATE OR REPLACE TEMP TABLE peek_bins AS
       WITH bounds AS (SELECT min(w)::DOUBLE AS lo, greatest(max(w), min(w) + 1)::DOUBLE AS hi FROM peek_valid)
       SELECT i AS bin,
