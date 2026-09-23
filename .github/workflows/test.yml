@@ -1,0 +1,39 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # The only network step: the DuckHTS wasm builds, checked against
+      # duckhts-manifest.json.  vendor/ is then assembled offline.
+      - run: npm run stage
+      - run: npm run vendor
+
+      - run: npx playwright-core install --with-deps chromium
+
+      # The committed thymus expectations must be exactly what the independent
+      # oracle produces.
+      - name: Oracle output is up to date
+        run: |
+          python3 test/oracle.py > /dev/null
+          git diff --exit-code test/fixtures/thymus-expected.json
+
+      - run: npm test
