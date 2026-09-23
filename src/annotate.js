@@ -232,7 +232,7 @@ FROM piece WHERE e IS NOT NULL`,
 }
 
 /** Counts per category for one peak file: peak centres or peak base pairs. */
-function peakCountSql({ fid, narrowPeak }, partitionIndex, settings) {
+export function peakCountSql({ fid, narrowPeak }, partitionIndex, settings) {
   const { mode } = settings;
   const useSummits = settings.useSummits && narrowPeak;
   const validSummit = "summit IS NOT NULL AND summit >= 0 AND summit < e - s";

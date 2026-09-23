@@ -5,7 +5,7 @@ const rows = async (conn, sql) => (await conn.query(sql)).toArray().map((row) =>
   Object.fromEntries(Object.entries(row.toJSON()).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])));
 
 /** No annotation needed. The caller owns input URLs until this promise settles. */
-export async function peek(conn, { peaks }, { files } = {}) {
+export async function peek(conn, { peaks }, { files, keepTables = false } = {}) {
   files ??= await readPeaks(conn, peaks);
   let indexed = false;
   try {
@@ -87,8 +87,12 @@ export async function peek(conn, { peaks }, { files } = {}) {
     return { results, aligned };
   } finally {
     if (indexed) await conn.query(`SELECT duckhts_cgranges_destroy('peek')`);
-    for (const table of ["peek_valid", "peek_span", "peek_bins", "peek_bin_grid"]) {
-      await conn.query(`DROP TABLE IF EXISTS ${table}`);
-    }
+    if (!keepTables) await clearPeek(conn);
+  }
+}
+
+export async function clearPeek(conn) {
+  for (const table of ["peek_valid", "peek_span", "peek_bins", "peek_bin_grid"]) {
+    await conn.query(`DROP TABLE IF EXISTS ${table}`);
   }
 }

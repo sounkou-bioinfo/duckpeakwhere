@@ -115,6 +115,17 @@
         <h2>Problems and extreme widths</h2>
         <div id="peek-problems"></div>
       </div>
+      <details id="sql-console">
+        <summary>SQL</summary>
+        <label for="sql-examples">Examples</label>
+        <select id="sql-examples"></select>
+        <label for="sql-input">Query</label>
+        <textarea id="sql-input" rows="12" spellcheck="false"></textarea>
+        <button id="sql-run" type="button">Run</button>
+        <pre id="sql-error" role="alert"></pre>
+        <pre id="sql-status" aria-live="polite"></pre>
+        <table id="sql-result" class="sql-result"></table>
+      </details>
     </section>
   </main>
   <footer class="site">

@@ -4,6 +4,7 @@ import { openDatabase } from "./db.js";
 import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
 import { CATEGORIES, CATEGORY_LABELS, DEFAULT_SETTINGS, categoriesFor } from "./annotate.js";
 import { createSession } from "./session.js";
+import { createSqlConsole, mountSqlConsole } from "./sql-console.js";
 import { drawPeek, download } from "./peek-view.js";
 
 /** Bundled datasets, served from this origin. */
@@ -292,9 +293,20 @@ async function main() {
     return;
   }
 
+  const sqlConsole = mountSqlConsole($("sql-console"), createSqlConsole(session), () => {
+    try { return { ...request(), live: session.context() }; }
+    catch { return {}; } // A partial local selection has no file examples yet.
+  }, { onBusy(busy) {
+    $("run").disabled = busy;
+    $("files").disabled = busy;
+    $("view").disabled = busy;
+    $("where-settings").disabled = busy || $("view").value === "peek";
+  } });
+
   $("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     $("run").disabled = true;
+    sqlConsole.setBusy(true);
     $("files").disabled = true;
     $("view").disabled = true;
     $("where-settings").disabled = true;
@@ -330,6 +342,8 @@ async function main() {
       $("view").disabled = false;
       $("where-settings").disabled = isPeek;
       $("run").disabled = false;
+      sqlConsole.setBusy(false);
+      sqlConsole.refresh();
     }
   });
 }

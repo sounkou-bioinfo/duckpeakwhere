@@ -6,6 +6,7 @@
   import { annotate } from "../src/annotate.js";
   import { peek } from "../src/peek.js";
   import { createSession } from "../src/session.js";
+  import { createSqlConsole } from "../src/sql-console.js";
   const ready = openDatabase();
   const queries = [], plans = [];
   const session = ready.then(({ conn }) => createSession({ async query(sql) {
@@ -16,6 +17,9 @@
     }
     return conn.query(sql);
   } }));
+  const sqlConsole = session.then((s) => createSqlConsole(s));
+  window.runSql = async (sql) => (await sqlConsole).runQuery(sql);
+  window.sqlExamples = async (selection) => (await sqlConsole).examples({ ...selection, live: (await session).context() });
   window.runSession = async (view, request) => (await session).run(view, request);
   window.clearSession = async () => (await session).clear();
   window.takeQueries = () => queries.splice(0);
