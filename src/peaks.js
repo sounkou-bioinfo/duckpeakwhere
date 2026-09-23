@@ -1,6 +1,14 @@
 // One BED-family contract for Where and Peek. DuckHTS owns parsing and contig keys.
 const lit = (value) => `'${String(value).replaceAll("'", "''")}'`;
 
+// Explicit narrowPeak schema for direct SQL inspection of the ten fields.
+export function narrowPeakReader(url) {
+  return `read_tabix(${lit(url)},
+  header_names := ['chrom', 'start', 'end', 'name', 'score', 'strand', 'signal_value', 'p_value', 'q_value', 'peak'],
+  column_types := ['VARCHAR', 'BIGINT', 'BIGINT', 'VARCHAR', 'DOUBLE', 'VARCHAR', 'DOUBLE', 'DOUBLE', 'DOUBLE', 'BIGINT'],
+  scan_mode := 'sequential')`;
+}
+
 export const readPeaks = (conn, peaks) => createPeakStore(conn).sync(peaks);
 
 export function createPeakStore(conn) {
@@ -62,6 +70,8 @@ export function createPeakStore(conn) {
       WHERE fid = ${fid} AND reason IS NOT NULL GROUP BY reason ORDER BY reason`)).toArray()
       .map((r) => ({ reason: r.reason, n: Number(r.n) }));
     // read_bed calls column 10 block_count; only narrowPeak defines it as a summit.
+    // read_tabix differs on track/browser lines and integer overflow: keep BED validity.
+    // Reader contract gaps: https://github.com/RGenomicsETL/duckhts/issues/250.
     const narrowPeak = /\.narrowPeak(?:\.(?:gz|bgz))?(?:[?#].*)?$/i.test(file.filename ?? file.url);
     return { ...file, fid, narrowPeak, error, rejected,
       rejectedCount: rejected.reduce((n, r) => n + r.n, 0) };
