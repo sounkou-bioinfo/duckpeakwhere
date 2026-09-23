@@ -91,6 +91,22 @@ The SQL is in [`src/annotate.js`](src/annotate.js) (Where), [`src/peek.js`](src/
 (Peek) and [`src/peaks.js`](src/peaks.js) (shared peak ingestion). Tables are cached for
 the session, so changing a setting re-counts rather than re-reads.
 
+## Try the SQL
+
+Run **Where** on a dataset, then open the **SQL console** below the results.
+Paste either query into the console and click **Run**:
+
+```sql
+SELECT count(*) AS transcripts FROM tx;
+```
+
+```sql
+SELECT fid, count(*) AS peaks FROM peak WHERE reason IS NULL GROUP BY fid ORDER BY fid;
+```
+
+The first reads Where's transcript table; the second counts accepted peaks by file ID.
+**Show the SQL** beneath each view's results lists the statements used for that run.
+
 ## The same SQL, outside the browser
 
 Nothing in it is browser-specific. These chunks run in the DuckDB CLI with the same

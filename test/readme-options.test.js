@@ -13,3 +13,10 @@ test("README describes optional Downstream and summit counting next to chrom.siz
   assert.match(options, /narrowPeak.*summit.*off by default/s);
   assert.match(options, /missing or out-of-range.*midpoint/s);
 });
+
+test("README offers two live-console SQL examples", () => {
+  const section = readme.slice(readme.indexOf("## Try the SQL"), readme.indexOf("## The same SQL"));
+  assert.match(section, /SQL console/);
+  assert.match(section, /SELECT count\(\*\) AS transcripts FROM tx;/);
+  assert.match(section, /SELECT fid, count\(\*\) AS peaks FROM peak/);
+});
