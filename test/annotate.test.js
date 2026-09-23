@@ -64,6 +64,23 @@ test("chromosome names match without the chr prefix", async () => {
   assert.deepEqual(results[0].counts, pick(expected.counts_centre));
 });
 
+// seandavi/peakwhere#26: Ensembl names the type attributes *_biotype (GTF) or biotype (GFF3).
+for (const annotation of ["ensembl.gtf", "ensembl.gff3"]) {
+  test(`${annotation}: the protein-coding filter reads Ensembl biotypes`, async () => {
+    const { results, warnings } = await annotate({
+      annotation: fixture(annotation), peaks, settings: { proteinCodingOnly: true },
+    });
+    assert.deepEqual(results[0].counts, pick(expected.counts_centre));
+    assert.ok(!warnings.some((w) => /every transcript was kept/.test(w)));
+  });
+
+  test(`${annotation}: without the filter, the lncRNA's promoter holds p17`, async () => {
+    const { results } = await annotate({ annotation: fixture(annotation), peaks });
+    const { promoter, intergenic } = expected.counts_centre;
+    assert.deepEqual(results[0].counts, pick({ ...expected.counts_centre, promoter: promoter + 1, intergenic: intergenic - 1 }));
+  });
+}
+
 // The signed release's transport limit: https://github.com/RGenomicsETL/duckhts/issues/246.
 // Fails when the signed build gains blob support, so its pin and warning can be reviewed.
 test("signed DuckHTS cannot read registered files or blob: URLs", async () => {

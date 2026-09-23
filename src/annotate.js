@@ -35,6 +35,11 @@ export const MAX_UNMATCHED_FRACTION = 0.05;
 /** Priority of each category: the index in CATEGORIES, 1-based. Intergenic is never indexed. */
 const PRIORITY = Object.fromEntries(CATEGORIES.map((c, i) => [c, i + 1]));
 
+// Type attribute keys: GENCODE's names, then Ensembl's (*_biotype in GTF, biotype in GFF3).
+// GFF3's one biotype key reads as gene_type, which every transcript falls back to.
+const TRANSCRIPT_TYPE = "(?:transcript_type|transcript_biotype)";
+const GENE_TYPE = "(?:gene_type|gene_biotype|biotype)";
+
 const ASSEMBLY = /\b(GRC[hm]\d+|mm\d+|hg\d+)\b/;
 
 let runCounter = 0;
@@ -82,8 +87,8 @@ function featureSql(format, url) {
 CREATE OR REPLACE TEMP TABLE feature AS
 SELECT seqname, ckey, s, e, strand, type, kind,
        CASE WHEN kind IS NOT NULL OR type = 'transcript' THEN ${attr("transcript_id")} END AS transcript_id,
-       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr("transcript_type")} END AS transcript_type,
-       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr("gene_type")} END AS gene_type
+       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr(TRANSCRIPT_TYPE)} END AS transcript_type,
+       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr(GENE_TYPE)} END AS gene_type
 FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
              lower(feature) AS type, ${kind} AS kind, attributes
       FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
@@ -113,8 +118,8 @@ CREATE OR REPLACE TEMP TABLE feature AS
 SELECT seqname, ckey, s, e, strand, type, kind,
        ${attr("Parent")} AS parent,
        CASE WHEN kind IS NULL THEN ${attr("ID")} END AS id,
-       CASE WHEN kind IS NULL THEN ${attr("transcript_type")} END AS transcript_type,
-       CASE WHEN kind IS NULL THEN ${attr("gene_type")} END AS gene_type
+       CASE WHEN kind IS NULL THEN ${attr(TRANSCRIPT_TYPE)} END AS transcript_type,
+       CASE WHEN kind IS NULL THEN ${attr(GENE_TYPE)} END AS gene_type
 FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
              lower(feature) AS type, ${kind} AS kind, attributes
       FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
@@ -321,7 +326,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
       const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
       if (Number(typed) === 0) {
         settings.proteinCodingOnly = false;
-        warnings.push("The annotation has no transcript_type or gene_type, so every transcript was kept.");
+        warnings.push("The annotation has no transcript_type, gene_type or Ensembl biotype, so every transcript was kept.");
       }
     }
     const categoryKey = JSON.stringify([settings.promoterUpstream, settings.promoterDownstream, settings.proteinCodingOnly]);
