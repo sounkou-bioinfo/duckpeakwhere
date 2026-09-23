@@ -1,0 +1,84 @@
+---
+output: github_document
+---
+
+<!-- Render with `make head-to-head`; receipts come from bench/head-to-head-*.mjs. -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+up <- jsonlite::read_json("head-to-head-upstream.json")
+ours <- jsonlite::read_json("head-to-head-ours.json")
+timed <- function(runs) Filter(function(r) !isTRUE(r$warmup), runs)
+stat <- function(x) sprintf("%.2f [%.2f–%.2f]", median(x), min(x), max(x))
+col <- function(runs, f) vapply(timed(runs), f, numeric(1))
+```
+
+# Head-to-head: duckpeakwhere vs upstream peakwhere
+
+Status: measurement receipt for
+[issue #1](https://github.com/sounkou-bioinfo/duckpeakwhere/issues/1)'s follow-up, taken
+on 2026-09-23. It checks upstream's README claims ("2.9 s", "re-draws in under half a
+second", "matches bedtools") on one machine, with the same inputs and browser.
+
+- **Upstream:** [seandavi/peakwhere](https://github.com/seandavi/peakwhere) at
+  `f40a673842815b9eef08c4d32243b29dac3e0646` (`node bench/stage-upstream.mjs`), served as
+  committed and driven through its real file inputs.
+- **duckpeakwhere:** `develop` at `5fa746b` (per-key attribute extraction, #8), signed
+  DuckHTS 1.5.2, W2 files over same-origin HTTP.
+- **Inputs (W2):** GENCODE vM25 basic (full), plus the full ENCODE thymus narrowPeak files
+  ENCFF714WDP, ENCFF979ULB, ENCFF478UYW, ENCFF853BYO, ENCFF674JZY (hash-pinned in
+  `bench/manifest.json`). Default settings: promoter −1000/+1000, peak centres, all transcripts.
+- **Machine:** 13th Gen Intel Core i5-13500 (20 logical CPUs), headless Chromium
+  148.0.7778.96. One warm-up plus five timed runs per tool, each run in a fresh browser
+  context, the tools run one after the other.
+
+## Seconds, median [min–max] of five runs
+
+```{r timing}
+rows <- data.frame(
+  step = c("Database + DuckHTS startup", "First analysis (Run → results)",
+           "Redraw: centres → base pairs", "Redraw: promoter upstream 2000"),
+  upstream = c("—", stat(col(up, function(r) r$run)),
+               stat(col(up, function(r) r$redraw$mode_bp)), stat(col(up, function(r) r$redraw$promoter_2000))),
+  duckpeakwhere = c(stat(col(ours, function(r) r$startup)), stat(col(ours, function(r) r$run)),
+                    stat(col(ours, function(r) r$redraw$mode_bp)), stat(col(ours, function(r) r$redraw$promoter_2000))))
+knitr::kable(rows, align = "lrr")
+```
+
+Upstream re-runs 300 ms after a setting change (`src/app.js`), so its redraw times
+include that debounce. duckpeakwhere at this commit re-runs the whole analysis,
+re-reading the annotation. Neither tool sent a request outside its own origin in any run.
+
+## Agreement
+
+```{r agreement}
+csv <- up[[which(vapply(up, function(r) !is.null(r$csv), logical(1)))[1]]]$csv
+lines <- strsplit(csv, "\n")[[1]]
+table <- read.csv(text = paste(lines[!startsWith(lines, "#")], collapse = "\n"))
+table <- table[startsWith(table$label, "thymus_"), ]
+categories <- c("promoter", "utr5", "utr3", "exon", "intron", "intergenic")
+mine <- timed(ours)[[1]]$counts
+cmp <- do.call(rbind, lapply(seq_len(nrow(table)), function(i) {
+  mark <- strsplit(table$label[i], "_")[[1]][2]
+  theirs <- unlist(table[i, categories])
+  ours_row <- vapply(categories, function(k) as.numeric(mine[[mark]][[k]]), numeric(1))
+  data.frame(file = mark, identical_categories = sum(theirs == ours_row), of = length(categories))
+}))
+stopifnot(all(cmp$identical_categories == cmp$of))
+knitr::kable(cmp)
+```
+
+All `r sum(cmp$identical_categories)` per-category peak-centre counts are identical
+between the two implementations, which share no code. The report stops rendering if any
+differ.
+
+## Reading
+
+- **"2.9 s"**: not reproduced on this machine (median `r sprintf("%.2f", median(col(up, function(r) r$run)))` s). It was
+  reported on other hardware, so this is not evidence the claim is false, only that it
+  does not transfer.
+- **"Under half a second"**: about right; roughly 0.2 s of compute after the 0.3 s debounce.
+- **Gap to close**: duckpeakwhere's first analysis is
+  `r sprintf("%.1f", median(col(ours, function(r) r$run)) / median(col(up, function(r) r$run)))`×
+  upstream's, and its redraws re-read everything. The first is tracked in
+  [duckhts#249](https://github.com/RGenomicsETL/duckhts/issues/249); the second is session caching.
