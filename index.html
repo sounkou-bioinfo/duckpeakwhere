@@ -94,6 +94,10 @@
         <div class="scroll"><table id="table"></table></div>
         <button id="where-tsv" type="button">Download summary TSV</button>
         <button id="where-svg" type="button">Download chart SVG</button>
+        <details class="executed-sql"><summary>Show the SQL</summary>
+          <pre></pre><button type="button" data-action="copy">Copy</button>
+          <button type="button" data-action="open">Open in console</button>
+        </details>
       </div>
       <div id="peek-results" hidden>
         <h2>Peek summary</h2>
@@ -115,6 +119,10 @@
         <button id="chrom-svg" type="button">Download chromosome SVG</button>
         <h2>Problems and extreme widths</h2>
         <div id="peek-problems"></div>
+        <details class="executed-sql"><summary>Show the SQL</summary>
+          <pre></pre><button type="button" data-action="copy">Copy</button>
+          <button type="button" data-action="open">Open in console</button>
+        </details>
       </div>
       <details id="sql-console">
         <summary>SQL</summary>

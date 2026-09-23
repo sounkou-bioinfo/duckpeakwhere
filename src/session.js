@@ -15,7 +15,12 @@ function changesState(sql) {
 }
 
 export function createSession(conn) {
-  const cache = {}, peaks = createPeakStore(conn);
+  let recording = null, lastStatements = [];
+  const analysisConn = { query(sql) {
+    recording?.push(sql);
+    return conn.query(sql);
+  } };
+  const cache = {}, peaks = createPeakStore(analysisConn);
   let pending = Promise.resolve(), invalidated = false, live = {};
   const serial = (operation) => {
     const result = pending.then(operation);
@@ -24,24 +29,30 @@ export function createSession(conn) {
   };
   async function clear() {
     live = {};
-    await clearAnnotation(conn, cache);
+    await clearAnnotation(analysisConn, cache);
     await peaks.clear();
-    await clearPeek(conn);
+    await clearPeek(analysisConn);
     invalidated = false;
   }
   return {
     run(view, request, observer = {}) {
       return serial(async () => {
-        if (invalidated) await clear();
-        if (live.view === "peek") await clearPeek(conn);
-        live = {};
-        const files = await peaks.sync(request.peaks);
-        const result = view === "peek"
-          ? await peek(conn, request, { files, keepTables: true })
-          : await annotate(conn, request, { ...observer, cache, files });
-        live = { ...request, view, files, settings: result.meta?.settings,
-          format: result.meta?.format, partitionIndex: cache.partitionIndex };
-        return result;
+        lastStatements = [];
+        recording = lastStatements;
+        try {
+          if (invalidated) await clear();
+          if (live.view === "peek") await clearPeek(analysisConn);
+          live = {};
+          const files = await peaks.sync(request.peaks);
+          const result = view === "peek"
+            ? await peek(analysisConn, request, { files, keepTables: true })
+            : await annotate(analysisConn, request, { ...observer, cache, files });
+          live = { ...request, view, files, settings: result.meta?.settings,
+            format: result.meta?.format, partitionIndex: cache.partitionIndex };
+          return result;
+        } finally {
+          recording = null;
+        }
       });
     },
     query(sql) {
@@ -52,6 +63,7 @@ export function createSession(conn) {
       });
     },
     context: () => live,
+    executedStatements: () => [...lastStatements],
     clear: () => serial(clear),
   };
 }

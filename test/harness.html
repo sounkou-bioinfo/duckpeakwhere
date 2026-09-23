@@ -1,12 +1,16 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>duckpeakwhere test harness</title>
+<div id="where-results"><details class="executed-sql"><summary>Show the SQL</summary><pre></pre><button data-action="copy">Copy</button><button data-action="open">Open in console</button></details></div>
+<div id="peek-results"><details class="executed-sql"><summary>Show the SQL</summary><pre></pre><button data-action="copy">Copy</button><button data-action="open">Open in console</button></details></div>
+<textarea id="sql-input"></textarea>
 <script type="module">
   import { openDatabase } from "../src/db.js";
   import { annotate } from "../src/annotate.js";
   import { peek } from "../src/peek.js";
   import { createSession } from "../src/session.js";
   import { createSqlConsole } from "../src/sql-console.js";
+  import { mountExecutedSql } from "../src/executed-sql.js";
   const ready = openDatabase();
   const queries = [], plans = [];
   const session = ready.then(({ conn }) => createSession({ async query(sql) {
@@ -20,7 +24,15 @@
   const sqlConsole = session.then((s) => createSqlConsole(s));
   window.runSql = async (sql) => (await sqlConsole).runQuery(sql);
   window.sqlExamples = async (selection) => (await sqlConsole).examples({ ...selection, live: (await session).context() });
-  window.runSession = async (view, request) => (await session).run(view, request);
+  const showSql = Object.fromEntries(["where", "peek"].map((view) =>
+    [view, mountExecutedSql(document.querySelector(`#${view}-results .executed-sql`),
+      { load(sql) { document.querySelector("#sql-input").value = sql; } })]));
+  window.runSession = async (view, request) => {
+    const result = await (await session).run(view, request);
+    showSql[view]((await session).executedStatements());
+    return result;
+  };
+  window.executedStatements = async () => (await session).executedStatements();
   window.sessionQuery = async (sql) => (await session).query(sql);
   window.clearSession = async () => (await session).clear();
   window.takeQueries = () => queries.splice(0);

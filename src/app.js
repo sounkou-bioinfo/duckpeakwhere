@@ -5,6 +5,7 @@ import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
 import { CATEGORIES, CATEGORY_LABELS, DEFAULT_SETTINGS, categoriesFor } from "./annotate.js";
 import { createSession } from "./session.js";
 import { createSqlConsole, mountSqlConsole } from "./sql-console.js";
+import { mountExecutedSql } from "./executed-sql.js";
 import { drawPeek, download } from "./peek-view.js";
 
 /** Bundled datasets, served from this origin. */
@@ -300,6 +301,9 @@ async function main() {
     $("where-settings").disabled = busy || $("view").value === "peek";
   } });
 
+  const showSql = Object.fromEntries(["where", "peek"].map((view) =>
+    [view, mountExecutedSql($(`${view}-results`).querySelector(".executed-sql"), sqlConsole)]));
+
   $("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     $("run").disabled = true;
@@ -323,7 +327,9 @@ async function main() {
         }
         input.chromSizes = sizesSource;
       }
-      const result = await session.run(isPeek ? "peek" : "where", input);
+      const view = isPeek ? "peek" : "where";
+      const result = await session.run(view, input);
+      showSql[view](session.executedStatements());
       // Shown before drawing so the charts can size themselves to the results column.
       $("output").hidden = false;
       if (isPeek) drawPeek(result);
