@@ -68,26 +68,35 @@ function featureSql(format, url) {
       WHEN 'exon' THEN 'exon' WHEN 'cds' THEN 'cds'
       WHEN 'five_prime_utr' THEN 'utr5' WHEN 'three_prime_utr' THEN 'utr3'
       WHEN 'utr' THEN 'utr' END`;
-  const common = `
-CREATE OR REPLACE TEMP TABLE feature AS
-SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
-       lower(feature) AS type, ${kind} AS kind, attributes_map AS a
-FROM ${reader}(${lit(url)}, attributes_map := true, scan_mode := 'sequential');`;
+  // Attributes are extracted per key and only on the rows that use that key, rather
+  // than parsing every row into a MAP: on GENCODE the MAP cost ~8 of ~9 s natively.
+  const attr = (key) => format === "gtf"
+    ? `nullif(regexp_extract(attributes, '(?:^|;)\\s*${key}\\s+"([^"]*)"', 1), '')`
+    : `nullif(regexp_extract(attributes, '(?:^|;)\\s*${key}=([^;]*)', 1), '')`;
 
   if (format === "gtf") {
-    return `${common}
+    // GTF links by transcript_id; the type keys are read on exon and transcript lines.
+    return `
+CREATE OR REPLACE TEMP TABLE feature AS
+SELECT seqname, ckey, s, e, strand, type, kind,
+       CASE WHEN kind IS NOT NULL OR type = 'transcript' THEN ${attr("transcript_id")} END AS transcript_id,
+       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr("transcript_type")} END AS transcript_type,
+       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr("gene_type")} END AS gene_type
+FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
+             lower(feature) AS type, ${kind} AS kind, attributes
+      FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
 CREATE OR REPLACE TEMP TABLE part AS
-SELECT a['transcript_id'] AS tx, ckey, s, e, strand, kind
-FROM feature WHERE kind IS NOT NULL AND a['transcript_id'] IS NOT NULL;
+SELECT transcript_id AS tx, ckey, s, e, strand, kind
+FROM feature WHERE kind IS NOT NULL AND transcript_id IS NOT NULL;
 CREATE OR REPLACE TEMP TABLE tx AS
 WITH exon_span AS (
-  SELECT a['transcript_id'] AS tx, any_value(ckey) AS ckey, min(s) AS s, max(e) AS e,
+  SELECT transcript_id AS tx, any_value(ckey) AS ckey, min(s) AS s, max(e) AS e,
          any_value(strand) AS strand,
-         any_value(coalesce(a['transcript_type'], a['gene_type'])) AS biotype
-  FROM feature WHERE kind = 'exon' AND a['transcript_id'] IS NOT NULL GROUP BY 1
+         any_value(coalesce(transcript_type, gene_type)) AS biotype
+  FROM feature WHERE kind = 'exon' AND transcript_id IS NOT NULL GROUP BY 1
 ), line AS (
-  SELECT a['transcript_id'] AS tx, any_value(s) AS s, any_value(e) AS e, any_value(strand) AS strand,
-         any_value(coalesce(a['transcript_type'], a['gene_type'])) AS biotype
+  SELECT transcript_id AS tx, any_value(s) AS s, any_value(e) AS e, any_value(strand) AS strand,
+         any_value(coalesce(transcript_type, gene_type)) AS biotype
   FROM feature WHERE type = 'transcript' GROUP BY 1
 )
 SELECT x.tx, x.ckey, coalesce(l.s, x.s) AS s, coalesce(l.e, x.e) AS e,
@@ -95,19 +104,31 @@ SELECT x.tx, x.ckey, coalesce(l.s, x.s) AS s, coalesce(l.e, x.e) AS e,
 FROM exon_span x LEFT JOIN line l USING (tx);`;
   }
 
-  return `${common}
+  // GFF3 links by ID/Parent. Parts (exon, CDS, UTR) need only Parent. Transcripts and
+  // genes are among the non-part rows, which also carry ID and the type keys.
+  return `
+CREATE OR REPLACE TEMP TABLE feature AS
+SELECT seqname, ckey, s, e, strand, type, kind,
+       ${attr("Parent")} AS parent,
+       CASE WHEN kind IS NULL THEN ${attr("ID")} END AS id,
+       CASE WHEN kind IS NULL THEN ${attr("transcript_type")} END AS transcript_type,
+       CASE WHEN kind IS NULL THEN ${attr("gene_type")} END AS gene_type
+FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
+             lower(feature) AS type, ${kind} AS kind, attributes
+      FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
 CREATE OR REPLACE TEMP TABLE part AS
 SELECT url_decode(trim(p.tx)) AS tx, ckey, s, e, strand, kind
-FROM feature, unnest(string_split(a['Parent'], ',')) AS p(tx)
+FROM feature, unnest(string_split(parent, ',')) AS p(tx)
 WHERE kind IS NOT NULL;
 CREATE OR REPLACE TEMP TABLE tx AS
 WITH id AS (
-  SELECT url_decode(a['ID']) AS id, ckey, s, e, strand, a FROM feature WHERE a['ID'] IS NOT NULL
+  SELECT url_decode(id) AS id, ckey, s, e, strand, parent, transcript_type, gene_type
+  FROM feature WHERE id IS NOT NULL
 )
 SELECT t.id AS tx, t.ckey, t.s, t.e, t.strand,
-       coalesce(t.a['transcript_type'], t.a['gene_type'], g.a['gene_type']) AS biotype
+       coalesce(t.transcript_type, t.gene_type, g.gene_type) AS biotype
 FROM id t
-LEFT JOIN id g ON g.id = url_decode(t.a['Parent'])
+LEFT JOIN id g ON g.id = url_decode(t.parent)
 WHERE t.id IN (SELECT tx FROM part WHERE kind = 'exon');`;
 }
 
