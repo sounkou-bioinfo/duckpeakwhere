@@ -101,7 +101,7 @@ test("empty files and equal widths have defined summaries and bins; reruns relea
 });
 
 // Reader limits, not approximations to PeakPeek's parser. Browser-reader work is tracked
-// at https://github.com/RGenomicsETL/duckhts/issues/246; these semantic gaps need upstream APIs.
+// at https://github.com/RGenomicsETL/duckhts/issues/250; these semantic gaps need upstream APIs.
 test("DuckHTS reader limits: scientific notation is NULL; decimal narrowPeak fields are unavailable", async () => {
   const rows = await dev.evaluate(async () => {
     const { localFileUrl } = await import("/src/duckhts-loader.js");

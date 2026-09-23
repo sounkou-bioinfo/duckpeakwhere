@@ -203,24 +203,26 @@ FROM piece WHERE e IS NOT NULL`,
 function peakCountSql(fid, partitionIndex, mode) {
   const peaks = `
 WITH marked AS (
-  SELECT *, ckey IN (SELECT DISTINCT ckey FROM feature) AS matched
+  SELECT *, ckey IN (SELECT ckey FROM annotation_contig) AS matched
   FROM peak WHERE fid = ${fid} AND reason IS NULL
 )`;
   const hitPriority = `coalesce(list_min(list_transform(
       duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, c, c + 1), h -> h.label::INTEGER)),
       ${PRIORITY.intergenic})`;
   if (mode === "bp") {
-    return `${peaks}
-SELECT priority, sum(n)::BIGINT AS n FROM (
-  SELECT h.label::INTEGER AS priority, least(e, h.interval_end) - greatest(s, h.interval_start) AS n
-  FROM marked, unnest(duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e)) AS u(h)
-  WHERE matched
-  UNION ALL
-  SELECT ${PRIORITY.intergenic}, (e - s) - coalesce(list_sum(list_transform(
-      duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e),
-      h -> least(e, h.interval_end) - greatest(s, h.interval_start))), 0)
+    const genic = CATEGORIES.filter((c) => c !== "intergenic");
+    return `${peaks}, covered AS MATERIALIZED (
+  SELECT s, e, duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e) AS hits
   FROM marked WHERE matched
-) GROUP BY priority
+), tally AS (
+  SELECT coalesce(sum(e - s), 0)::BIGINT AS total,
+    ${genic.map((c) => `coalesce(sum(list_sum(list_transform(hits, h ->
+      CASE WHEN h.label::INTEGER = ${PRIORITY[c]} THEN least(e, h.interval_end) - greatest(s, h.interval_start)
+      ELSE 0 END))), 0)::BIGINT AS ${c}`).join(",\n    ")}
+  FROM covered
+)
+${genic.map((c) => `SELECT ${PRIORITY[c]} AS priority, ${c} AS n FROM tally`).join("\nUNION ALL ")}
+UNION ALL SELECT ${PRIORITY.intergenic}, total - (${genic.join(" + ")}) FROM tally
 UNION ALL SELECT -1, count(*) FILTER (matched) FROM marked
 UNION ALL SELECT -2, count(*) FILTER (NOT matched) FROM marked
 UNION ALL SELECT -3, sum(e - s) FILTER (NOT matched) FROM marked`;
@@ -239,7 +241,7 @@ function backgroundSql() {
   return `
 WITH len AS (
   SELECT ckey, max(length) AS length FROM chrom_length
-  WHERE ckey IN (SELECT DISTINCT ckey FROM feature) GROUP BY ckey
+  WHERE ckey IN (SELECT ckey FROM annotation_contig) GROUP BY ckey
 ), covered AS (
   SELECT g.priority, sum(least(g.e, len.length) - g.s) AS n
   FROM segment g JOIN len USING (ckey) WHERE g.s < len.length GROUP BY g.priority
@@ -310,6 +312,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
       await run(`CREATE OR REPLACE TEMP TABLE chrom_length (ckey VARCHAR, length BIGINT)`);
       if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
       await run(featureSql(cache.format, annotation));
+      await run(`CREATE OR REPLACE TEMP TABLE annotation_contig AS SELECT DISTINCT ckey FROM feature`);
       const [{ features }] = await rows(`SELECT count(*) AS features FROM feature WHERE ckey IS NOT NULL AND s >= 0 AND e > s`);
       if (Number(features) === 0) throw new Error("No annotation features could be read. Check the annotation format and compression.");
       cache.sourceKey = sourceKey;
@@ -347,7 +350,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
       const unmatchedChroms = (
         await rows(`SELECT DISTINCT trim(raw_chrom) AS chrom FROM peak
           WHERE fid = ${fid} AND reason IS NULL
-            AND ckey NOT IN (SELECT DISTINCT ckey FROM feature) ORDER BY chrom`)
+            AND ckey NOT IN (SELECT ckey FROM annotation_contig) ORDER BY chrom`)
       ).map((r) => r.chrom);
       const total = matchedPeaks + unmatchedPeaks;
       results.push({
@@ -400,7 +403,7 @@ export async function clearAnnotation(conn, cache) {
   for (const name of [cache.categoryIndex, cache.partitionIndex].filter(Boolean)) {
     await conn.query(`SELECT duckhts_cgranges_destroy(${lit(name)})`);
   }
-  for (const table of ["feature", "part", "tx", "used_tx", "category_interval", "segment", "chrom_length"]) {
+  for (const table of ["feature", "part", "tx", "used_tx", "category_interval", "segment", "chrom_length", "annotation_contig"]) {
     await conn.query(`DROP TABLE IF EXISTS ${table}`);
   }
   for (const key of Object.keys(cache)) delete cache[key];

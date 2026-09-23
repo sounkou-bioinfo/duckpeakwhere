@@ -10,8 +10,9 @@
   const queries = [], plans = [];
   const session = ready.then(({ conn }) => createSession({ async query(sql) {
     queries.push(sql);
-    if (sql.includes("FROM peek_bin_grid b LEFT JOIN")) {
-      plans.push((await conn.query(`EXPLAIN ${sql}`)).toArray().map((r) => r.explain_value).join("\n"));
+    if (sql.includes("FROM peek_bin_grid b LEFT JOIN") || sql.includes("covered AS MATERIALIZED")) {
+      plans.push({ kind: sql.includes("peek_bin_grid") ? "histogram" : "bp",
+        plan: (await conn.query(`EXPLAIN (FORMAT JSON) ${sql}`)).toArray().map((r) => r.explain_value).join("\n") });
     }
     return conn.query(sql);
   } }));

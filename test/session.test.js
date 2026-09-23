@@ -60,10 +60,16 @@ test("session invalidates only dependent tables and shares peak reads across vie
   assert.match(runs.annotation.sql, /FROM read_gtf\(/);
   assert.doesNotMatch(runs.annotation.sql, /read_bed/);
   assert.deepEqual(runs.tables, []);
-  assert.equal(runs.plans.length, 1);
-  assert.match(runs.plans[0], /BLOCKWISE_NL_JOIN/);
-  assert.match(runs.plans[0], /peek_bin_grid/);
-  assert.match(runs.plans[0], /peek_valid/);
+  const histogram = runs.plans.find((r) => r.kind === "histogram").plan;
+  assert.match(histogram, /BLOCKWISE_NL_JOIN/);
+  assert.match(histogram, /peek_bin_grid/);
+  assert.match(histogram, /peek_valid/);
+  for (const { plan } of runs.plans.filter((r) => r.kind === "bp")) {
+    assert.match(plan, /UNGROUPED_AGGREGATE/);
+    assert.match(plan, /HASH_JOIN/); // Contig membership, not an interval range join.
+    assert.doesNotMatch(plan, /INOUT_FUNCTION/); // No lateral UNNEST of per-peak hits.
+  }
+  assert.equal((runs.mode.sql.match(/duckhts_cgranges_overlaps_list/g) ?? []).length, 1);
 });
 
 test("percent-encoded and plain Parent links share a multi-parent exon", async () => {
@@ -93,4 +99,31 @@ test("cached counts equal uncached analyses for each settings change", async () 
     return { cached, uncached };
   });
   assert.deepEqual(pairs.cached, pairs.uncached);
+});
+
+test("annotation failures clear derived state without rereading selected peak files", async () => {
+  const got = await page.evaluate(async () => {
+    await window.clearSession();
+    window.takeQueries();
+    const base = `${location.origin}/test/fixtures/`;
+    const request = { annotation: `${base}missing.gff3`, peaks: [
+      { url: `${base}peaks.bed`, label: "valid" },
+      { url: `${base}peek/original.bed`, label: "short row" },
+    ] };
+    let error;
+    try { await window.runSession("where", request); } catch (e) { error = e.message; }
+    window.takeQueries();
+    request.annotation = `${base}fixture.gff3`;
+    const result = await window.runSession("where", request);
+    const sql = window.takeQueries().join("\n");
+    const peek = await window.runSession("peek", request);
+    return { error, result, peek, sql };
+  });
+  assert.match(got.error, /Failed to open file for header reading/);
+  assert.doesNotMatch(got.sql, /read_bed/);
+  assert.match(got.sql, /read_gff/);
+  assert.equal(got.result.results[0].peaks.matched, 16);
+  assert.equal(got.result.results[0].peaks.unmatched, 1); // chrZ in the hand-worked fixture.
+  assert.equal(got.result.results[1].error, got.peek.results[1].error);
+  assert.match(got.result.results[1].error, /fewer than 3/);
 });

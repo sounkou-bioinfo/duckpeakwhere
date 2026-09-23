@@ -113,16 +113,19 @@ ADR-0001/0003/0007/0011):
   boundaries.
 
 [`src/session.js`](src/session.js) owns the cached tables on one
-connection. Annotation header metadata and the `feature`, `part` and
-`tx` tables are loaded once per selected annotation. A centre/bp switch
-only counts against the retained cgranges partition; promoter or
-protein-coding changes rebuild categories and the partition, without
-file I/O. Peak selections retain unchanged files and read only
-additions/replacements. Switching views reuses the same peak table. File
-identity is its session URL and label; a failed file’s error is cached
-until that selection is removed or replaced. Clearing files drops the
-tables and destroys the cached index. Remote URLs are treated as
-immutable during the session.
+connection. Annotation header metadata, the `feature`, `part` and `tx`
+tables, and the annotation’s distinct contig set are loaded once per
+selected annotation. A centre/bp switch only counts against the retained
+cgranges partition; promoter or protein-coding changes rebuild
+categories and the partition, without file I/O. Base-pair counting
+probes cgranges once per accepted, matched peak, then reduces its
+overlap list into the five genic categories; intergenic is the remaining
+width. No lateral expansion of peak/segment pairs is needed. Peak
+selections retain unchanged files and read only additions/replacements.
+Switching views reuses the same peak table. File identity is its session
+URL and label; a failed file’s error is cached until that selection is
+removed or replaced. Clearing files drops the tables and destroys the
+cached index. Remote URLs are treated as immutable during the session.
 
 W2 centre counts are checked against the committed upstream peakwhere
 CSV and our head-to-head receipt on every timing run. PeakPeek

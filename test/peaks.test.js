@@ -13,7 +13,7 @@ after(() => browser.close());
 test("Where and Peek share accepted rows, named rejections and isolated file errors", async () => {
   const got = await page.evaluate(async () => {
     const texts = [
-      "chrF\t200\t210\ta\n F \t200\t210\tb\nchrF\t0\t0\nchrF\t5\t4\nchrF\t-1\t2\nchrF\tx\t2\nchrF\t1e3\t1001\nchrF\t2147483647\t2147483648\n",
+      "chrF\t200\t210\ta\n F \t200\t210\tb\nchrF\t0\t0\nchrF\t5\t4\nchrF\t-1\t2\nchrF\tx\t2\nchrF\t1e3\t1001\nchrF\t1.5\t2\n \t1\t2\nchrF\t2147483647\t2147483648\n",
       "chr1\t0\t2\nchr1\t5\n",
       "chrF\t700\t701\tgood\n",
       "",
@@ -35,9 +35,10 @@ test("Where and Peek share accepted rows, named rejections and isolated file err
   ]);
   const rejected = [
     { reason: "coordinate exceeds the cgranges 32-bit range", n: 1 },
+    { reason: "empty chromosome", n: 1 },
     { reason: "end before start", n: 1 },
     { reason: "negative coordinate", n: 1 },
-    { reason: "non-integer or missing coordinate", n: 2 },
+    { reason: "non-integer or missing coordinate", n: 3 },
     { reason: "zero width", n: 1 },
   ];
   for (let i = 0; i < 4; i++) {
