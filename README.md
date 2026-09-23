@@ -21,10 +21,16 @@ overlap engine with SQL over
 Everything runs in your browser, and the page makes no requests outside
 its own origin.
 
+The same page offers **Peek**, a BED-family sanity check based on Sean
+Davis’s [PeakPeek](https://github.com/seandavi/peakpeek): widths,
+coverage, chromosomes, duplicates and problems, with no annotation
+required. Switch **View** between **Where** and **Peek**; both share the
+file selection, database and local-file transport.
+
 ## How it works
 
-Everything is in [`src/annotate.js`](src/annotate.js), one SQL statement
-per step:
+Where is in [`src/annotate.js`](src/annotate.js), one SQL statement per
+step:
 
 | Step                                        | peakwhere                     | here                                                                     |
 |---------------------------------------------|-------------------------------|--------------------------------------------------------------------------|
@@ -48,6 +54,88 @@ The page makes no requests outside its own origin. duckdb-wasm,
 Observable Plot and the DuckHTS builds are served from `vendor/`. The
 default build is community-signed and loads with unsigned extensions
 disallowed.
+
+## Peek
+
+Choose **Peek**, select peak files, and click **Peek at peaks**. The
+summary includes valid peak count; minimum, median, mean and maximum
+widths; sum of widths; merged bp; chromosome count/style; off-main,
+duplicate, overlapping and \>100 kb counts; and excluded returned rows.
+Problems state their counts. Expand each file for its five smallest and
+largest peaks. Compare files with shared log-width bins and chromosome
+charts, in counts or percentages. Download the summary as TSV and either
+chart as SVG.
+
+[`src/peek.js`](src/peek.js) reads inputs with `read_bed`, validates
+returned coordinates in SQL, and reduces them in DuckDB. An index keyed
+by file and **original** chromosome name supplies
+`duckhts_cgranges_count_overlaps` for overlap counts and
+`duckhts_cgranges_has_overlap` for disjoint endpoint-span membership;
+summing covered spans gives merged bp. SQL supplies medians, means,
+duplicates, bins and grouping. `duckhts_contig_key` aligns chart aliases
+without changing raw-name statistics.
+[`src/peek-view.js`](src/peek-view.js) only displays results. There is
+no JavaScript parser, interval algorithm, sampling or annotation
+dependency.
+
+### PeakPeek compatibility
+
+The reference is PeakPeek commit
+[`4f91069`](https://github.com/seandavi/peakpeek/tree/4f91069acc009b6b0d83dced8d7a860462344fed),
+its `SPEC.md`, tests and accepted ADRs. This is a BED-family statistics
+port, not a replacement for PeakPeek’s complete input parser.
+
+| Rule                                                                                | Status here                                                                                                                                                                                                                                                                              |
+|-------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0-based half-open BED/narrowPeak/broadPeak, gzip                                    | Kept for tab-delimited inputs read by DuckHTS.                                                                                                                                                                                                                                           |
+| Zero width, negative/reversed/missing coordinates                                   | Excluded from returned rows with a count by reason (ADR-0001).                                                                                                                                                                                                                           |
+| Min/median/mean/max/sum; even median averages two middle widths                     | Kept. UI means show up to two decimals; TSV keeps the numeric result.                                                                                                                                                                                                                    |
+| Coordinate-only duplicates                                                          | Kept: count extra copies, ignoring name/score, without dropping them (ADR-0003).                                                                                                                                                                                                         |
+| Merged bp and overlapping peaks                                                     | Kept: touching joins coverage but does not count as overlap; each duplicate copy overlaps (ADRs 0004/0011).                                                                                                                                                                              |
+| Chromosomes                                                                         | Kept: statistics distinguish original names; chart aliases align; numbered/X/Y/M/MT are main, others group as `other` (ADR-0007, stats tests).                                                                                                                                           |
+| Distribution                                                                        | Kept: 30 shared log-spaced bins, last edge inclusive; equal widths expand the upper bound by 1; counts/percentages; no sampling (ADR-0006).                                                                                                                                              |
+| Problems                                                                            | Kept for returned intervals: duplicate/overlap/off-main/mixed-style counts and strictly \>100 kb. Failed files show an error while other files remain usable.                                                                                                                            |
+| CSV/TSV named-column tables and the 1-based toggle                                  | Not ported: outside `read_bed`’s contract (ADRs 0002/0005).                                                                                                                                                                                                                              |
+| Scientific-notation coordinates and tolerant malformed-row parsing                  | Not ported: DuckHTS returns NULL for scientific notation and aborts on short rows. It cannot reproduce PeakPeek’s rejected-line recovery.                                                                                                                                                |
+| Raw lines, skipped-line counts, exact format detection, rejection line numbers/text | Not available from `read_bed`; the UI says **excluded rows**, never invented line counts or diagnostics.                                                                                                                                                                                 |
+| narrowPeak signal/p/q ranges and raw record previews                                | Not ported: `read_bed` exposes BED12 fields, so decimal columns 7/8 are NULL and extra fields are not retained. Extremes show parsed coordinates/name only.                                                                                                                              |
+| Coordinates above 2,147,483,647                                                     | Excluded with an explicit reason: cgranges has an int32 coordinate limit.                                                                                                                                                                                                                |
+| UI/delivery                                                                         | Uses vendored Observable Plot, explicit Run, selected filenames/bundled labels, same-origin examples and local files. Editable extension-stripped labels, URL fetching and per-file removal are not ported. The large-file warning counts returned rows, not raw lines (ADRs 0008–0010). |
+
+These reader gaps cannot be repaired by statistics SQL because the
+necessary raw values are not exposed. Limitation tests pin the behavior
+to prompt review when DuckHTS adds those APIs; see its [`read_bed`
+implementation](https://github.com/RGenomicsETL/duckhts/blob/41d5e899b3d2771a47c130ee003a49ddb4a2c4e2/src/interval_udf.c)
+and the [browser-reader
+issue](https://github.com/RGenomicsETL/duckhts/issues/246). No
+JavaScript parser substitutes for it. Dedicated upstream
+parsing/diagnostic requests are still needed; \#246 concerns transport,
+not these semantic gaps.
+
+### Whole-genome thymus examples
+
+Where’s existing files are chr19 subsets. PeakPeek’s published answers
+are for the full ENCODE accessions. Stage the **whole-genome Peek**
+dataset (about 3.9 MB compressed) and select it in Peek:
+
+``` bash
+npm run stage:peek
+# Offline, with archived full files:
+npm run stage:peek -- /path/to/W2
+```
+
+The script reuses URLs and SHA-256 pins in `bench/manifest.json` and
+writes generated files under `vendor/peek-examples/`. At runtime they
+load only from this site’s origin. Switching back to Where from this
+Peek-only dataset selects the chr19 examples. Both signed and dev
+browser tests compare **all five files** to PeakPeek `SPEC.md` §2:
+including CTCF’s 20,220 peaks, one duplicate and 6,003,019 merged bp,
+and DNase’s 67,929 peaks and 14,146,163 merged bp. The hand-worked
+fixture and rule tests cover nesting, touching, duplicate identity,
+invalid returned coordinates and mixed names.
+[`test/fixtures/peek/README.md`](test/fixtures/peek/README.md) records
+oracle provenance. PeakPeek’s malformed fixture is tested as a reader
+limitation, not quietly accepted as a parser-equivalence test.
 
 ## The same SQL, outside the browser
 
@@ -204,6 +292,7 @@ the npm export can replace it.
 ``` bash
 npm ci
 npm run stage    # download the signed DuckHTS wasm builds, checked against duckhts-manifest.json
+npm run stage:peek # full thymus examples for Peek, checked against bench/manifest.json
 npm run vendor   # copy duckdb-wasm and Plot from node_modules into vendor/
 npm run serve    # http://127.0.0.1:8000/
 npm run stage:dev # unsigned build, required for the opt-in local-file tests
@@ -227,7 +316,11 @@ will replace both the staging script and `src/duckhts-loader.js`.
   [`thymus-expected.json`](test/fixtures/thymus-expected.json) from
   [`test/oracle.R`](test/oracle.R). The oracle is a slow brute-force
   implementation in base R that shares no code with the SQL.
-- `test/local-files.test.js` uploads and drops plain/gzipped annotations
+- `test/peek.test.js` checks PeakPeek’s hand-worked fixture and all five
+  documented full thymus results on signed and dev builds, plus interval
+  rules and reader limitations. `test/peek-app.test.js` checks
+  summaries, both charts, downloads and switching views.
+- `test/local-files.test.js` selects and drops plain/gzipped annotations
   and peaks, compares against the hand-worked oracle, checks reruns and
   URL cleanup after errors, and checks the signed-build message and
   opt-in unsigned setting.
@@ -241,4 +334,7 @@ House rules for contributors and agents are in [`AGENTS.md`](AGENTS.md).
 Example data comes from GENCODE and ENCODE; see
 [`examples/README.md`](examples/README.md).
 
-MIT licensed. See [`LICENSE`](LICENSE).
+[peakwhere](https://github.com/seandavi/peakwhere) and
+[PeakPeek](https://github.com/seandavi/peakpeek) are by **Sean Davis**.
+Their rules, specs, hand-worked fixtures and thymus examples are used
+here under MIT. See [`LICENSE`](LICENSE).

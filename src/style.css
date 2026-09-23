@@ -51,6 +51,11 @@ button {
 button:disabled { opacity: 0.6; cursor: default; }
 
 #output { margin-top: 1.5rem; }
+#width-chart, #chrom-chart { margin: 1.5rem 0; }
+#width-chart svg, #chrom-chart svg { max-width: 100%; height: auto; }
+#peek-table td[data-metric="label"], #peek-table td[data-metric="error"] { text-align: left; }
+#peek-problems section { border-top: 1px solid var(--line); padding: 0.5rem 0; }
+#peek-problems h3 { overflow-wrap: anywhere; }
 #warnings { color: #b45309; font-size: 0.9rem; }
 .scroll { overflow-x: auto; }
 table { border-collapse: collapse; font-size: 0.9rem; }

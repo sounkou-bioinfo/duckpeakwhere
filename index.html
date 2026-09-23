@@ -16,17 +16,25 @@
       <p>Where do your peaks land? Peaks are split into promoter, UTR, exon, intron and
         intergenic space by SQL over <a href="https://github.com/RGenomicsETL/duckhts">DuckHTS</a>,
         running in DuckDB inside this tab. A port of
-        <a href="https://github.com/seandavi/peakwhere">peakwhere</a> by Sean Davis.</p>
+        <a href="https://github.com/seandavi/peakwhere">peakwhere</a> by Sean Davis.
+        <strong>Peek</strong> checks widths, chromosome distribution and problems without an annotation,
+        following his <a href="https://github.com/seandavi/peakpeek">PeakPeek</a>.</p>
       <p class="note">Local files stay in this browser; nothing is uploaded. Bundled examples load from this site.
         <a href="https://github.com/sounkou-bioinfo/duckpeakwhere#local-files">Local-file support and the development build</a>.</p>
     </header>
 
     <form id="form">
+      <label>View <select id="view">
+        <option value="where">Where — genomic annotation</option>
+        <option value="peek">Peek — peak-file sanity check</option>
+      </select></label>
+      <p id="peek-help" class="note" hidden>Peek reads BED / narrowPeak / broadPeak (plain or gzip),
+        on 0-based half-open coordinates. No annotation is needed. CSV/TSV tables are not supported.</p>
       <fieldset id="files">
         <legend>Data</legend>
         <label>Dataset <select id="dataset"></select></label>
         <div id="bundled-files">
-          <label>Annotation <select id="annotation"></select></label>
+          <label id="bundled-annotation">Annotation <select id="annotation"></select></label>
           <div id="peaks" class="checks"></div>
         </div>
         <div id="local-files" hidden>
@@ -43,8 +51,8 @@
         </div>
       </fieldset>
 
-      <fieldset>
-        <legend>Settings</legend>
+      <fieldset id="where-settings">
+        <legend>Where settings</legend>
         <label>Promoter upstream (bp) <input id="up" type="number" min="0" step="1" value="1000"></label>
         <label>Promoter downstream (bp) <input id="down" type="number" min="0" step="1" value="1000"></label>
         <label>Count
@@ -61,10 +69,36 @@
     </form>
 
     <section id="output" hidden>
-      <div id="chart"></div>
-      <p id="summary" class="note"></p>
-      <ul id="warnings"></ul>
-      <div class="scroll"><table id="table"></table></div>
+      <div id="where-results">
+        <div id="chart"></div>
+        <p id="summary" class="note"></p>
+        <ul id="warnings"></ul>
+        <div class="scroll"><table id="table"></table></div>
+      </div>
+      <div id="peek-results" hidden>
+        <h2>Peek summary</h2>
+        <p class="note">Widths = end − start. Duplicates are counted, not dropped.
+          Merged bp joins touching and overlapping intervals per original chromosome name.
+          Chromosome charts align aliases (chr1 / 1, M / MT); statistics keep names distinct.</p>
+        <p class="note" id="peek-limits">DuckHTS exposes parsed BED rows, not raw-line diagnostics:
+          skipped-line counts, original line numbers/text, scientific-notation coordinates and
+          signal/p/q ranges are unavailable. A short row can fail the whole file. Only coordinates
+          through 2,147,483,647 are supported by the overlap kernel.
+          <a href="https://github.com/sounkou-bioinfo/duckpeakwhere#peakpeek-compatibility">Compatibility details</a>.</p>
+        <div class="scroll"><table id="peek-table"></table></div>
+        <button id="peek-tsv" type="button">Download summary TSV</button>
+        <h2>Width distribution</h2>
+        <label>Height <select id="width-unit"><option value="fraction">Percent of file</option><option value="count">Peaks</option></select></label>
+        <p class="note">30 shared log-spaced bins; the last bin includes the maximum. No sampling.</p>
+        <div id="width-chart"></div>
+        <button id="width-svg" type="button">Download width SVG</button>
+        <h2>Chromosome distribution</h2>
+        <label>Height <select id="chrom-unit"><option value="fraction">Percent of file</option><option value="count">Peaks</option></select></label>
+        <div id="chrom-chart"></div>
+        <button id="chrom-svg" type="button">Download chromosome SVG</button>
+        <h2>Problems and extreme widths</h2>
+        <div id="peek-problems"></div>
+      </div>
     </section>
   </main>
 </body>

@@ -4,6 +4,7 @@
 <script type="module">
   import { openDatabase } from "../src/db.js";
   import { annotate } from "../src/annotate.js";
+  import { peek } from "../src/peek.js";
   const ready = openDatabase();
   window.annotateUrls = async (request) => {
     const { conn } = await ready;
@@ -39,6 +40,14 @@
       URL.revokeObjectURL(url);
       await db.dropFile("registered.bed");
     }
+  };
+  window.runPeek = async (request) => {
+    const { conn } = await ready;
+    return peek(conn, request);
+  };
+  window.query = async (sql) => {
+    const { conn } = await ready;
+    return (await conn.query(sql)).toArray().map((row) => row.toJSON());
   };
   window.databaseInfo = async () => {
     const { conn, platform, version } = await ready;

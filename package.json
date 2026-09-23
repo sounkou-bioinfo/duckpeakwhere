@@ -18,6 +18,7 @@
   "scripts": {
     "stage": "node scripts/stage-duckhts.mjs",
     "stage:dev": "node scripts/stage-duckhts-dev.mjs",
+    "stage:peek": "node scripts/stage-peek-examples.mjs",
     "vendor": "node scripts/vendor.mjs",
     "serve": "node scripts/serve.mjs",
     "test": "node --test \"test/*.test.js\""

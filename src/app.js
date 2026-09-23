@@ -1,8 +1,10 @@
-// Page wiring: select files, run the SQL annotation, draw the result.
+// One file selection and database, two SQL analyses: Where and Peek.
 import * as Plot from "../vendor/plot.js";
 import { openDatabase } from "./db.js";
 import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
 import { annotate, CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
+import { peek } from "./peek.js";
+import { drawPeek } from "./peek-view.js";
 
 /** Bundled datasets, served from this origin. */
 export const DATASETS = {
@@ -28,6 +30,12 @@ export const DATASETS = {
       "peaks-nochr": "test/fixtures/peaks-nochr.bed",
     },
   },
+};
+DATASETS.thymusFull = {
+  name: "Mouse thymus, whole genome (Peek; ENCODE)",
+  annotations: {},
+  peaks: Object.fromEntries(Object.entries(DATASETS.thymus.peaks)
+    .map(([label, path]) => [label, path.replace("examples/", "vendor/peek-examples/").replace(".chr19", "")])),
 };
 
 const COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#65a30d", "#9ca3af"];
@@ -88,10 +96,26 @@ function showDataset(key) {
   );
 }
 
+function showView() {
+  const isPeek = $("view").value === "peek";
+  for (const id of ["where-settings", "bundled-annotation", "annotation-drop", "where-results"]) $(id).hidden = isPeek;
+  $("where-settings").disabled = isPeek;
+  $("peek-help").hidden = !isPeek;
+  $("peek-results").hidden = !isPeek;
+  $("output").hidden = true;
+  $("run").textContent = isPeek ? "Peek at peaks" : "Annotate peaks";
+  $("dataset").querySelector('[value="thymusFull"]').disabled = !isPeek;
+  if (!isPeek && $("dataset").value === "thymusFull") {
+    $("dataset").value = "thymus";
+    showDataset("thymus");
+  }
+}
+
 function request(sources) {
   const isLocal = $("dataset").value === "local";
+  const isPeek = $("view").value === "peek";
   if (isLocal && !localSupported) throw new Error(LOCAL_UNSUPPORTED);
-  if (isLocal && !localAnnotation) throw new Error("Choose an annotation file.");
+  if (isLocal && !isPeek && !localAnnotation) throw new Error("Choose an annotation file.");
   const url = (file) => {
     const source = localFileUrl(file);
     sources.push(source);
@@ -104,6 +128,7 @@ function request(sources) {
       label: box.dataset.label,
     }));
   if (peaks.length === 0) throw new Error("Choose at least one peak file.");
+  if (isPeek) return { peaks };
   return {
     annotation: isLocal ? url(localAnnotation) : new URL($("annotation").value, location.href).href,
     annotationName: isLocal ? localAnnotation.name : $("annotation").value,
@@ -177,6 +202,8 @@ async function main() {
   $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);
+  showView();
+  $("view").addEventListener("change", showView);
   $("clear-files").addEventListener("click", clearLocalFiles);
   for (const kind of ["annotation", "peaks"]) {
     $(kind === "annotation" ? "local-annotation" : "local-peaks").addEventListener("change", (event) => selectFiles(kind, event.target.files));
@@ -197,7 +224,7 @@ async function main() {
     $("status").textContent = `DuckDB ${opened.version} (${opened.platform}) with DuckHTS loaded.` +
       (new URLSearchParams(location.search).get("duckhts") === "dev" ? " Development build: unsigned extensions enabled." : "");
     $("run").disabled = false;
-    $("run").textContent = "Annotate peaks";
+    showView();
   } catch (error) {
     $("status").textContent = `Could not start DuckDB with DuckHTS: ${error.message}`;
     $("run").textContent = "Unavailable";
@@ -208,13 +235,19 @@ async function main() {
     event.preventDefault();
     $("run").disabled = true;
     $("files").disabled = true;
+    $("view").disabled = true;
+    $("where-settings").disabled = true;
     $("output").hidden = true;
     delete document.body.dataset.state;
-    $("status").textContent = "Annotating…";
+    const isPeek = $("view").value === "peek";
+    $("status").textContent = isPeek ? "Checking peaks…" : "Annotating…";
     const started = performance.now();
     const sources = [];
     try {
-      draw(await annotate(conn, request(sources)));
+      const input = request(sources);
+      if (isPeek) drawPeek(await peek(conn, input));
+      else draw(await annotate(conn, input));
+      $("output").hidden = false;
       $("status").textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)} s.`;
       document.body.dataset.state = "done";
     } catch (error) {
@@ -223,6 +256,8 @@ async function main() {
     } finally {
       for (const source of sources) source.revoke();
       $("files").disabled = false;
+      $("view").disabled = false;
+      $("where-settings").disabled = isPeek;
       $("run").disabled = false;
     }
   });
