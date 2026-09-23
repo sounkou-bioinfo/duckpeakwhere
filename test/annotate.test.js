@@ -81,6 +81,16 @@ for (const annotation of ["ensembl.gtf", "ensembl.gff3"]) {
   });
 }
 
+// seandavi/peakwhere#27: a transcript_id reused on another chromosome is another transcript.
+test("reused-id.gtf: each copy of a reused transcript_id keeps its own chromosome", async () => {
+  const { results } = await annotate({
+    annotation: fixture("reused-id.gtf"),
+    peaks: [...peaks, { url: fixture("peaks-chrG.bed"), label: "chrG" }],
+  });
+  assert.deepEqual(results[0].counts, pick(expected.counts_centre));
+  assert.deepEqual(results[1].counts, { promoter: 1, utr5: 1, utr3: 1, exon: 0, intron: 1, intergenic: 1 });
+});
+
 // The signed release's transport limit: https://github.com/RGenomicsETL/duckhts/issues/246.
 // Fails when the signed build gains blob support, so its pin and warning can be reviewed.
 test("signed DuckHTS cannot read registered files or blob: URLs", async () => {
