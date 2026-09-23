@@ -1,0 +1,8 @@
+{
+  "native": {
+    "version": "1.5.2",
+    "url": "https://community-extensions.duckdb.org/v1.5.5/linux_amd64/duckhts.duckdb_extension.gz",
+    "sha256": "9df0025d9ea52960482c2f10e5aafe83d281cfd5a2289de7b71a82f96f0cf827",
+    "path": "bench/.cache/native/duckhts.duckdb_extension.gz"
+  }
+}

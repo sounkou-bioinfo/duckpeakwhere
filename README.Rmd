@@ -98,7 +98,7 @@ without looking for a tabix index. Here is the annotation as `read_gff` sees it:
 SELECT feature, count(*) AS n
 FROM read_gff('examples/gencode.vM25.basic.chr19.gff3.gz', scan_mode := 'sequential')
 GROUP BY feature
-ORDER BY n DESC
+ORDER BY n DESC, feature
 LIMIT 6;
 ```
 
@@ -129,6 +129,21 @@ reproduce every number:
 expected <- jsonlite::fromJSON("test/fixtures/thymus-expected.json")$counts_centre
 counts <- do.call(rbind, lapply(expected, unlist))
 knitr::kable(counts)
+```
+
+## Performance
+
+Local W1 (7,220 thymus chr19 peaks) analysis totals in seconds, **median [min–max]**
+of five runs after one warm-up. Native replays the app's exact SQL over the same
+local HTTP inputs; ChIPseeker uses one-base peak centres but has different annotation
+rules, so these are not equal-output speedups. Startup-inclusive times, correctness
+gates, category differences, environment and reproduction commands are in the
+[performance report](benchmarks/performance.md).
+
+```{r performance, echo = FALSE}
+source("bench/report.R")
+performance <- jsonlite::read_json("benchmarks/results.json", simplifyVector = FALSE)
+knitr::kable(headline(performance), row.names = FALSE)
 ```
 
 ## Limitations

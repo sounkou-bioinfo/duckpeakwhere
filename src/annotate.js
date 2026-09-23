@@ -247,9 +247,11 @@ function countsFrom(rows) {
  * @param {string} request.annotation URL of a GFF3 or GTF file, plain or gzipped
  * @param {{url: string, label: string}[]} request.peaks BED/narrowPeak/broadPeak URLs
  * @param {object} [request.settings] see DEFAULT_SETTINGS
+ * @param {object} [observer] Optional phase observer for benchmarking.
+ * @param {(phase: string) => void} [observer.onPhase]
  * @returns {Promise<{results: object[], background: object | null, meta: object, warnings: string[]}>}
  */
-export async function annotate(conn, { annotation, peaks, settings: given = {} }) {
+export async function annotate(conn, { annotation, peaks, settings: given = {} }, { onPhase = () => {} } = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...given };
   nonNegativeInt(settings.promoterUpstream, "Promoter upstream");
   nonNegativeInt(settings.promoterDownstream, "Promoter downstream");
@@ -263,6 +265,7 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
   };
   const warnings = [];
 
+  onPhase("partition");
   // Header lines: format, assembly and ##sequence-region lengths.
   const headerLines = (
     await rows(`SELECT line FROM (
@@ -297,6 +300,7 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
   const partitionIndex = `partition_${id}`;
   for (const statement of partitionSql(categoryIndex, partitionIndex)) await conn.query(statement);
 
+  onPhase("count");
   try {
     const results = [];
     for (const { url, label } of peaks) {
@@ -345,5 +349,6 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
     return { results, background, meta, warnings };
   } finally {
     await conn.query(`SELECT duckhts_cgranges_destroy(${lit(partitionIndex)})`);
+    onPhase("done");
   }
 }

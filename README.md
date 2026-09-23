@@ -55,7 +55,7 @@ index. Here is the annotation as `read_gff` sees it:
 SELECT feature, count(*) AS n
 FROM read_gff('examples/gencode.vM25.basic.chr19.gff3.gz', scan_mode := 'sequential')
 GROUP BY feature
-ORDER BY n DESC
+ORDER BY n DESC, feature
 LIMIT 6;
 #> ┌─────────────────┬───────┐
 #> │     feature     │   n   │
@@ -66,7 +66,7 @@ LIMIT 6;
 #> │ five_prime_UTR  │  2429 │
 #> │ transcript      │  2303 │
 #> │ three_prime_UTR │  1577 │
-#> │ stop_codon      │  1553 │
+#> │ start_codon     │  1553 │
 #> └─────────────────┴───────┘
 ```
 
@@ -114,6 +114,20 @@ end-to-end test requires the page to reproduce every number:
 | H3K27me3 |      233 |    1 |   13 |   29 |    148 |        181 |
 | H3K36me3 |       96 |    5 |  226 |  440 |   2007 |         81 |
 | H3K4me3  |      594 |    1 |    8 |   30 |    148 |         78 |
+
+## Performance
+
+Local W1 (7,220 thymus chr19 peaks) analysis totals in seconds, **median
+\[min–max\]** of five runs after one warm-up. Native replays the app’s
+exact SQL over the same local HTTP inputs; ChIPseeker uses one-base peak
+centres but has different annotation rules, so these are not
+equal-output speedups. Startup-inclusive times, correctness gates,
+category differences, environment and reproduction commands are in the
+[performance report](benchmarks/performance.md).
+
+| Workload | wasm                  | native-1t             | native-nt             | chipseeker            |
+|:---------|:----------------------|:----------------------|:----------------------|:----------------------|
+| W1       | 0.830 \[0.750–1.195\] | 0.515 \[0.431–0.624\] | 0.384 \[0.361–0.525\] | 3.148 \[2.853–4.453\] |
 
 ## Limitations
 
