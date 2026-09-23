@@ -40,7 +40,8 @@ function download(name, data, type) {
 }
 function charts({ results, aligned }) {
   const files = results.filter((r) => r.n > 0);
-  const label = (fid) => `${fid + 1}. ${results[fid].label}`;
+  const byId = new Map(results.map((r, i) => [r.fid, { ...r, title: `${i + 1}. ${r.label}` }]));
+  const label = (fid) => byId.get(fid).title;
   const domain = files.map((r) => label(r.fid));
   const color = { domain, range: COLORS, legend: true };
   const percentWidth = $("width-unit").value === "fraction";
@@ -56,7 +57,7 @@ function charts({ results, aligned }) {
   })] : [element("p", "No valid peaks to plot.")]));
   const percentChrom = $("chrom-unit").value === "fraction";
   const chroms = [...new Set(aligned.map((r) => r.chrom))];
-  const counts = aligned.map((r) => ({ ...r, file: label(r.fid), value: percentChrom ? r.n / results[r.fid].n * 100 : r.n }));
+  const counts = aligned.map((r) => ({ ...r, file: label(r.fid), value: percentChrom ? r.n / byId.get(r.fid).n * 100 : r.n }));
   $("chrom-chart").replaceChildren(...(files.length ? [Plot.plot({
     width: 900, height: Math.max(240, 160 * files.length), marginLeft: 70, marginRight: 170,
     x: { label: "Chromosome (aligned names)", domain: chroms },

@@ -13,7 +13,8 @@ before(async () => {
 after(() => session.close());
 async function run(target = page) {
   await target.click("#run");
-  await target.waitForSelector('body[data-state="done"] #run:not([disabled])', { timeout: 120_000 });
+  await target.waitForSelector('body[data-state] #run:not([disabled])', { timeout: 120_000 });
+  assert.equal(await target.getAttribute("body", "data-state"), "done", await target.textContent("#status"));
 }
 async function summary(target = page) {
   return target.$$eval("#peek-table tr[data-label]", (rows) => Object.fromEntries(rows.map((row) => [row.dataset.label,
@@ -77,7 +78,8 @@ test("local selection is shared by Where and Peek, and annotation is optional in
   assert.equal((await summary(local))["accepted.bed"].n, "9");
   assert.equal(await local.inputValue("#local-annotation"), "");
   const urls = await local.evaluate(() => window.urls);
-  assert.deepEqual(urls.created, urls.revoked);
+  assert.equal(urls.created.length, 1);
+  assert.deepEqual(urls.revoked, []);
   await local.selectOption("#view", "where");
   assert.equal(await local.locator("#annotation-drop").isVisible(), true);
   assert.equal(await local.textContent("#peak-names"), "accepted.bed");
@@ -90,7 +92,11 @@ test("local selection is shared by Where and Peek, and annotation is optional in
   assert.equal((await summary(local))["peaks.bed"].n, "17");
   assert.equal(await local.textContent("#annotation-name"), "fixture.gff3");
   const rerunUrls = await local.evaluate(() => window.urls);
-  assert.deepEqual(rerunUrls.created, rerunUrls.revoked);
+  assert.equal(rerunUrls.created.length, 3, "view switch reuses the selected peak URL");
+  assert.deepEqual(rerunUrls.revoked, urls.created, "replaced peaks are revoked");
+  await local.click("#clear-files");
+  const cleared = await local.evaluate(() => window.urls);
+  assert.deepEqual(cleared.created.sort(), cleared.revoked.sort());
   await local.close();
 });
 

@@ -5,8 +5,8 @@ const rows = async (conn, sql) => (await conn.query(sql)).toArray().map((row) =>
   Object.fromEntries(Object.entries(row.toJSON()).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])));
 
 /** No annotation needed. The caller owns input URLs until this promise settles. */
-export async function peek(conn, { peaks }) {
-  const files = await readPeaks(conn, peaks);
+export async function peek(conn, { peaks }, { files } = {}) {
+  files ??= await readPeaks(conn, peaks);
   let indexed = false;
   try {
     await conn.query(`CREATE OR REPLACE TEMP TABLE peek_valid AS
@@ -59,7 +59,7 @@ export async function peek(conn, { peaks }) {
         CASE WHEN i = 29 THEN hi ELSE exp(ln(lo) + (i + 1) * ((ln(hi) - ln(lo)) / 30)) END AS "to"
       FROM bounds, range(30) t(i) WHERE lo IS NOT NULL`);
     const histogram = await rows(conn, `SELECT f.fid, b.bin, b."from", b."to", count(v.rid) AS n
-      FROM range(${peaks.length}) f(fid) CROSS JOIN peek_bins b
+      FROM (VALUES ${files.map(({ fid }) => `(${fid})`).join(",")}) f(fid) CROSS JOIN peek_bins b
       LEFT JOIN peek_valid v ON v.fid = f.fid AND v.w >= b."from"
         AND (v.w < b."to" OR (b.bin = 29 AND v.w <= b."to"))
       GROUP BY ALL ORDER BY f.fid, b.bin`);

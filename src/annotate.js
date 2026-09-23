@@ -273,7 +273,10 @@ function countsFrom(rows) {
  * @param {(phase: string) => void} [observer.onPhase]
  * @returns {Promise<{results: object[], background: object | null, meta: object, warnings: string[]}>}
  */
-export async function annotate(conn, { annotation, annotationName = annotation, peaks, settings: given = {} }, { onPhase = () => {} } = {}) {
+export async function annotate(conn, { annotation, annotationName = annotation, peaks, settings: given = {} },
+  { onPhase = () => {}, cache, files } = {}) {
+  const persistent = !!cache;
+  cache ??= {};
   const settings = { ...DEFAULT_SETTINGS, ...given };
   nonNegativeInt(settings.promoterUpstream, "Promoter upstream");
   nonNegativeInt(settings.promoterDownstream, "Promoter downstream");
@@ -288,40 +291,50 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
   const warnings = [];
 
   onPhase("partition");
-  // Header lines: format, assembly and ##sequence-region lengths.
-  const headerLines = (
-    await rows(`SELECT raw FROM read_hts_header(${lit(annotation)}, format := 'tabix', mode := 'raw') ORDER BY idx`)
-  ).map((r) => r.raw);
-  const format = annotationFormat(annotationName, headerLines);
-  const assembly = headerLines.map((l) => ASSEMBLY.exec(l)?.[1]).find(Boolean) ?? null;
-  const lengths = headerLines
-    .filter((l) => l.startsWith("##sequence-region"))
-    .map((l) => l.trim().split(/\s+/))
-    .filter((f) => f.length >= 4 && Number.isInteger(Number(f[3])))
-    .map(([, chrom, , end]) => `(duckhts_contig_key(${lit(chrom)}), ${Number(end)})`);
-  await run(`CREATE OR REPLACE TEMP TABLE chrom_length (ckey VARCHAR, length BIGINT)`);
-  if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
-
-  await run(featureSql(format, annotation));
-  const [{ features }] = await rows(`SELECT count(*) AS features FROM feature WHERE ckey IS NOT NULL AND s >= 0 AND e > s`);
-  if (Number(features) === 0) throw new Error("No annotation features could be read. Check the annotation format and compression.");
-  if (settings.proteinCodingOnly) {
-    const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
-    if (Number(typed) === 0) {
-      settings.proteinCodingOnly = false;
-      warnings.push("The annotation has no transcript_type or gene_type, so every transcript was kept.");
-    }
-  }
-  await run(categorySql(settings));
-
-  const id = ++runCounter;
-  const categoryIndex = `category_${id}`;
-  const partitionIndex = `partition_${id}`;
-  for (const statement of partitionSql(categoryIndex, partitionIndex)) await conn.query(statement);
-
-  onPhase("count");
   try {
-    const files = await readPeaks(conn, peaks);
+    const sourceKey = JSON.stringify([annotation, annotationName]);
+    if (cache.sourceKey !== sourceKey) {
+      await clearAnnotation(conn, cache);
+      // Header metadata is read once alongside the full feature scan.
+      const headerLines = (
+        await rows(`SELECT raw FROM read_hts_header(${lit(annotation)}, format := 'tabix', mode := 'raw') ORDER BY idx`)
+      ).map((r) => r.raw);
+      cache.format = annotationFormat(annotationName, headerLines);
+      cache.assembly = headerLines.map((l) => ASSEMBLY.exec(l)?.[1]).find(Boolean) ?? null;
+      const lengths = headerLines
+        .filter((l) => l.startsWith("##sequence-region"))
+        .map((l) => l.trim().split(/\s+/))
+        .filter((f) => f.length >= 4 && Number.isInteger(Number(f[3])))
+        .map(([, chrom, , end]) => `(duckhts_contig_key(${lit(chrom)}), ${Number(end)})`);
+      await run(`CREATE OR REPLACE TEMP TABLE chrom_length (ckey VARCHAR, length BIGINT)`);
+      if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
+      await run(featureSql(cache.format, annotation));
+      const [{ features }] = await rows(`SELECT count(*) AS features FROM feature WHERE ckey IS NOT NULL AND s >= 0 AND e > s`);
+      if (Number(features) === 0) throw new Error("No annotation features could be read. Check the annotation format and compression.");
+      cache.sourceKey = sourceKey;
+    }
+    if (settings.proteinCodingOnly) {
+      const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
+      if (Number(typed) === 0) {
+        settings.proteinCodingOnly = false;
+        warnings.push("The annotation has no transcript_type or gene_type, so every transcript was kept.");
+      }
+    }
+    const categoryKey = JSON.stringify([settings.promoterUpstream, settings.promoterDownstream, settings.proteinCodingOnly]);
+    if (cache.categoryKey !== categoryKey) {
+      if (cache.partitionIndex) await conn.query(`SELECT duckhts_cgranges_destroy(${lit(cache.partitionIndex)})`);
+      await run(categorySql(settings));
+      const id = ++runCounter;
+      cache.categoryIndex = `category_${id}`;
+      cache.partitionIndex = `partition_${id}`;
+      for (const statement of partitionSql(cache.categoryIndex, cache.partitionIndex)) await conn.query(statement);
+      delete cache.categoryIndex;
+      cache.categoryKey = categoryKey;
+      cache.background = undefined;
+    }
+    const { partitionIndex, format, assembly } = cache;
+    onPhase("count");
+    files ??= await readPeaks(conn, peaks);
     const results = [];
     for (const file of files) {
       const { fid, label, error, rejected, rejectedCount } = file;
@@ -354,8 +367,11 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
     let background = null;
     const [{ known }] = await rows(`SELECT count(*) AS known FROM chrom_length`);
     if (Number(known) > 0) {
-      const { counts, extra } = countsFrom(await rows(backgroundSql()));
-      background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
+      if (!cache.background) {
+        const { counts, extra } = countsFrom(await rows(backgroundSql()));
+        cache.background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
+      }
+      background = cache.background;
       for (const { fid, label } of files) {
         const [{ past }] = await rows(`SELECT count(*) AS past FROM peak b
           JOIN chrom_length l USING (ckey) WHERE fid = ${fid} AND reason IS NULL AND b.e > l.length`);
@@ -370,8 +386,21 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
     const [{ transcripts }] = await rows(`SELECT count(*) AS transcripts FROM used_tx`);
     const meta = { annotation, format, assembly, transcripts: Number(transcripts), settings };
     return { results, background, meta, warnings };
+  } catch (error) {
+    await clearAnnotation(conn, cache);
+    throw error;
   } finally {
-    await conn.query(`SELECT duckhts_cgranges_destroy(${lit(partitionIndex)})`);
+    if (!persistent) await clearAnnotation(conn, cache);
     onPhase("done");
   }
+}
+
+export async function clearAnnotation(conn, cache) {
+  for (const name of [cache.categoryIndex, cache.partitionIndex].filter(Boolean)) {
+    await conn.query(`SELECT duckhts_cgranges_destroy(${lit(name)})`);
+  }
+  for (const table of ["feature", "part", "tx", "used_tx", "category_interval", "segment", "chrom_length"]) {
+    await conn.query(`DROP TABLE IF EXISTS ${table}`);
+  }
+  for (const key of Object.keys(cache)) delete cache[key];
 }

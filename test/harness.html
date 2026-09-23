@@ -5,7 +5,16 @@
   import { openDatabase } from "../src/db.js";
   import { annotate } from "../src/annotate.js";
   import { peek } from "../src/peek.js";
+  import { createSession } from "../src/session.js";
   const ready = openDatabase();
+  const queries = [];
+  const session = ready.then(({ conn }) => createSession({ query(sql) {
+    queries.push(sql);
+    return conn.query(sql);
+  } }));
+  window.runSession = async (view, request) => (await session).run(view, request);
+  window.clearSession = async () => (await session).clear();
+  window.takeQueries = () => queries.splice(0);
   window.annotateUrls = async (request) => {
     const { conn } = await ready;
     const absolute = (u) => new URL(u, location.href).href;

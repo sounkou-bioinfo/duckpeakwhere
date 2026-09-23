@@ -33,7 +33,7 @@ async function run(state = "done") {
   await page.waitForSelector(`body[data-state="${state}"] #run:not([disabled])`, { timeout: 120_000 });
   assert.equal(await page.getAttribute("body", "data-state"), state, await page.textContent("#status"));
   const urls = await page.evaluate(() => window.localUrls);
-  assert.deepEqual(urls.revoked.sort(), urls.created.sort(), "all URLs revoked after the run");
+  assert.equal(urls.created.length - urls.revoked.length, 3, "selected annotation and peaks retain their URLs");
 }
 async function counts(label) {
   return page.$$eval("#table tr[data-label]", (rows, label) => {
@@ -64,8 +64,10 @@ for (const name of ["fixture.gff3", "fixture.gtf"]) {
       for (const peak of ["peaks.bed", "peaks-nochr.bed"]) assert.deepEqual(await counts(peak + (gzip ? ".gz" : "")), want("counts_centre"));
       if (name === "fixture.gff3") assert.deepEqual(await counts("Genome"), want("genomeBackground_bp"));
       else assert.match(await page.textContent("#warnings"), /Genome bar is hidden/);
+      const urls = await page.evaluate(() => window.localUrls.created.length);
       await page.selectOption("#mode", "bp");
       await run();
+      assert.equal(await page.evaluate(() => window.localUrls.created.length), urls, "redraw reuses URLs");
       assert.deepEqual(await counts("peaks.bed" + (gzip ? ".gz" : "")), want("basepairs"));
     });
   }
@@ -92,11 +94,13 @@ test("drag/drop gzip narrowPeak and broadPeak; filenames are text, not markup", 
   assert.equal(await page.locator("#table img").count(), 0);
 });
 
-test("failed input releases URLs; clear and dataset switch discard selected files", async () => {
+test("selected URLs survive errors; replacing, clearing and switching datasets revoke them", async () => {
   await page.setInputFiles("#local-annotation", { name: "broken.gtf.gz", mimeType: "application/gzip", buffer: Buffer.from([0x1f, 0x8b, 8, 0]) });
   await run("error");
   assert.equal(await page.locator("#output").isVisible(), false);
   await page.click("#clear-files");
+  const urls = await page.evaluate(() => window.localUrls);
+  assert.deepEqual(urls.revoked.sort(), urls.created.sort(), "clearing revokes every selected URL");
   assert.equal(await page.textContent("#annotation-name"), "No annotation selected");
   assert.equal(await page.textContent("#peak-names"), "No peak files selected");
   await page.setInputFiles("#local-annotation", await fixture("fixture.gff3"));

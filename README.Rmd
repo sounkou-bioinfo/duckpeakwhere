@@ -140,6 +140,16 @@ and PeakPeek at `4f91069` (SPEC §5/§6, ADR-0001/0003/0007/0011):
   await [DuckHTS #250](https://github.com/RGenomicsETL/duckhts/issues/250). We do not
   implement a second parser. Known-limit tests pin these boundaries.
 
+[`src/session.js`](src/session.js) owns the cached tables on one connection. Annotation
+header metadata and the `feature`, `part` and `tx` tables are loaded once per selected
+annotation. A centre/bp switch only counts against the retained cgranges partition;
+promoter or protein-coding changes rebuild categories and the partition, without file
+I/O. Peak selections retain unchanged files and read only additions/replacements.
+Switching views reuses the same peak table. File identity is its session URL and label;
+a failed file's error is cached until that selection is removed or replaced. Clearing
+files drops the tables and destroys the cached index. Remote URLs are treated as
+immutable during the session.
+
 W2 centre counts are checked against the committed upstream peakwhere CSV and
 our head-to-head receipt on every timing run. PeakPeek statistics are checked only
 against its own hand-worked fixture and full-file SPEC expectations.
@@ -267,10 +277,10 @@ knitr::kable(headline(performance), row.names = FALSE)
 Choose **Local files**, then pick or drop one GFF3/GTF annotation and one or more
 BED/narrowPeak/broadPeak files. Plain and gzip inputs use the same DuckHTS readers as
 the bundled examples. Files stay in the browser: `localFileUrl` creates a `blob:` URL
-for htslib, without uploading or registering a DuckDB virtual file. Each run keeps its
-URLs alive through all queries and revokes them on success or failure. Selected files
-remain available for reruns; **Clear local files** or choosing a bundled dataset releases
-the selection. The original annotation filename identifies GTF even though the URL has
+for htslib, without uploading or registering a DuckDB virtual file. A selected file keeps
+one URL for the session, including after an analysis error; removing or replacing that
+file revokes it. Where, Peek and setting changes share those URLs. **Clear local files**
+or choosing a bundled dataset releases the selection and cached tables. The original annotation filename identifies GTF even though the URL has
 no suffix; headers and gzip decoding go through DuckHTS.
 
 **Signing gap:** the pinned signed DuckHTS 1.5.2 build cannot read `blob:` URLs

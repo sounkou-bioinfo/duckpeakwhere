@@ -2,8 +2,8 @@
 import * as Plot from "../vendor/plot.js";
 import { openDatabase } from "./db.js";
 import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
-import { annotate, CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
-import { peek } from "./peek.js";
+import { CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
+import { createSession } from "./session.js";
 import { drawPeek } from "./peek-view.js";
 
 /** Bundled datasets, served from this origin. */
@@ -44,10 +44,24 @@ const LOCAL_UNSUPPORTED = "This signed DuckHTS build cannot read local files (bl
 let localAnnotation = null;
 let localPeaks = [];
 let localSupported = false;
+let session, reset = Promise.resolve();
+const sources = new Map();
+
+function releaseRemovedFiles() {
+  const selected = new Set([localAnnotation, ...localPeaks]);
+  for (const [file, source] of sources) {
+    if (!selected.has(file)) {
+      source.revoke();
+      sources.delete(file);
+    }
+  }
+}
 
 function clearLocalFiles() {
   localAnnotation = null;
   localPeaks = [];
+  releaseRemovedFiles();
+  if (session) reset = reset.then(() => session.clear());
   $("local-annotation").value = "";
   $("local-peaks").value = "";
   $("annotation-name").textContent = "No annotation selected";
@@ -63,6 +77,7 @@ function selectFiles(kind, files) {
     localPeaks = [...files];
     $("peak-names").textContent = localPeaks.map((f) => f.name).join(", ") || "No peak files selected";
   }
+  releaseRemovedFiles();
   $("output").hidden = true;
 }
 
@@ -111,15 +126,14 @@ function showView() {
   }
 }
 
-function request(sources) {
+function request() {
   const isLocal = $("dataset").value === "local";
   const isPeek = $("view").value === "peek";
   if (isLocal && !localSupported) throw new Error(LOCAL_UNSUPPORTED);
   if (isLocal && !isPeek && !localAnnotation) throw new Error("Choose an annotation file.");
   const url = (file) => {
-    const source = localFileUrl(file);
-    sources.push(source);
-    return source.url;
+    if (!sources.has(file)) sources.set(file, localFileUrl(file));
+    return sources.get(file).url;
   };
   const peaks = isLocal
     ? localPeaks.map((file) => ({ url: url(file), label: file.name }))
@@ -221,6 +235,7 @@ async function main() {
   try {
     const opened = await openDatabase();
     conn = opened.conn;
+    session = createSession(conn);
     localSupported = await supportsLocalFiles(conn);
     $("local-status").textContent = localSupported ? "Local files are read in this tab; nothing is uploaded." : LOCAL_UNSUPPORTED;
     $("status").textContent = `DuckDB ${opened.version} (${opened.platform}) with DuckHTS loaded.` +
@@ -244,11 +259,12 @@ async function main() {
     const isPeek = $("view").value === "peek";
     $("status").textContent = isPeek ? "Checking peaks…" : "Annotating…";
     const started = performance.now();
-    const sources = [];
     try {
-      const input = request(sources);
-      if (isPeek) drawPeek(await peek(conn, input));
-      else draw(await annotate(conn, input));
+      await reset;
+      const input = request();
+      const result = await session.run(isPeek ? "peek" : "where", input);
+      if (isPeek) drawPeek(result);
+      else draw(result);
       $("output").hidden = false;
       $("status").textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)} s.`;
       document.body.dataset.state = "done";
@@ -256,7 +272,6 @@ async function main() {
       $("status").textContent = error.message;
       document.body.dataset.state = "error";
     } finally {
-      for (const source of sources) source.revoke();
       $("files").disabled = false;
       $("view").disabled = false;
       $("where-settings").disabled = isPeek;
