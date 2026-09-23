@@ -153,6 +153,16 @@ present in the annotation contribute to the Genome bar. Annotation
 header lengths take precedence; peak counts and chromosome matching are
 unchanged.
 
+**Downstream** is off by default. When enabled, its window extends past
+the TES: forward on the positive strand, backward on the negative
+strand. Its priority is below Intron and above Intergenic (Promoter \>
+5′ UTR \> 3′ UTR \> Exon \> Intron \> Downstream \> Intergenic).
+
+Using **narrowPeak** summit positions for centre counting is off by
+default. A missing or out-of-range summit falls back to the peak
+midpoint. BED and broadPeak centres, and base-pair counting, are
+unaffected.
+
 Reading `blob:` URLs needs a DuckHTS release that includes it (merged,
 not yet released). Until then the page says so, and `?duckhts=dev` loads
 a pinned development build of DuckHTS that can.
