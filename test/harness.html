@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>duckpeakwhere test harness</title>
+<script type="module">
+  import { openDatabase } from "../src/db.js";
+  import { annotate } from "../src/annotate.js";
+  const ready = openDatabase();
+  window.annotateUrls = async (request) => {
+    const { conn } = await ready;
+    const absolute = (u) => new URL(u, location.href).href;
+    return annotate(conn, {
+      ...request,
+      annotation: absolute(request.annotation),
+      peaks: request.peaks.map((p) => ({ ...p, url: absolute(p.url) })),
+    });
+  };
+  // How a dropped file reaches DuckDB: registered with duckdb-wasm, or as a blob: URL.
+  window.probeLocalFile = async (path) => {
+    const { db, conn } = await ready;
+    const blob = await (await fetch(path)).blob();
+    const attempt = async (name) => {
+      try {
+        const rows = (await conn.query(`SELECT count(*) AS n FROM read_bed('${name}')`)).toArray();
+        return { ok: true, rows: Number(rows[0].n) };
+      } catch (error) {
+        return { ok: false, error: String(error.message) };
+      }
+    };
+    await db.registerFileBuffer("registered.bed", new Uint8Array(await blob.arrayBuffer()));
+    const core = (await conn.query("SELECT count(*) AS n FROM read_csv('registered.bed', comment = '#')")).toArray();
+    return {
+      coreReader: Number(core[0].n),
+      registered: await attempt("registered.bed"),
+      blobUrl: await attempt(URL.createObjectURL(blob)),
+    };
+  };
+  window.databaseInfo = async () => {
+    const { conn, platform, version } = await ready;
+    const unsigned = String((await conn.query("SELECT current_setting('allow_unsigned_extensions') AS v")).toArray()[0].v);
+    return { platform, version, unsigned };
+  };
+</script>

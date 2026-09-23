@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>duckpeakwhere</title>
+  <link rel="stylesheet" href="src/style.css">
+  <script type="module" src="src/app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>duckpeakwhere</h1>
+      <p>Where do your peaks land? Peaks are split into promoter, UTR, exon, intron and
+        intergenic space by SQL over <a href="https://github.com/RGenomicsETL/duckhts">DuckHTS</a>,
+        running in DuckDB inside this tab. A port of
+        <a href="https://github.com/seandavi/peakwhere">peakwhere</a> by Sean Davis.</p>
+      <p class="note">This demo runs on the bundled example files only. DuckHTS can't yet read
+        files dropped on the page
+        (<a href="https://github.com/RGenomicsETL/duckhts/issues/246">duckhts#246</a>).</p>
+    </header>
+
+    <form id="form">
+      <fieldset>
+        <legend>Data</legend>
+        <label>Dataset
+          <select id="dataset"></select>
+        </label>
+        <label>Annotation
+          <select id="annotation"></select>
+        </label>
+        <div id="peaks" class="checks"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Settings</legend>
+        <label>Promoter upstream (bp) <input id="up" type="number" min="0" step="1" value="1000"></label>
+        <label>Promoter downstream (bp) <input id="down" type="number" min="0" step="1" value="1000"></label>
+        <label>Count
+          <select id="mode">
+            <option value="centre">peak centres</option>
+            <option value="bp">peak base pairs</option>
+          </select>
+        </label>
+        <label class="inline"><input id="coding" type="checkbox"> Protein-coding transcripts only</label>
+      </fieldset>
+
+      <button id="run" type="submit" disabled>Starting DuckDB…</button>
+      <p id="status" role="status"></p>
+    </form>
+
+    <section id="output" hidden>
+      <div id="chart"></div>
+      <p id="summary" class="note"></p>
+      <ul id="warnings"></ul>
+      <div class="scroll"><table id="table"></table></div>
+    </section>
+  </main>
+</body>
+</html>
