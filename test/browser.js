@@ -7,9 +7,13 @@ export async function openBrowser() {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const requests = [];
+  const uploads = [];
   const newPage = async (path) => {
     const page = await browser.newPage();
-    page.on("request", (r) => requests.push(r.url()));
+    page.on("request", (r) => {
+      requests.push(r.url());
+      if (!["GET", "HEAD"].includes(r.method())) uploads.push({ method: r.method(), url: r.url() });
+    });
     await page.goto(`${base}${path}`);
     return page;
   };
@@ -17,5 +21,5 @@ export async function openBrowser() {
     await browser.close();
     server.close();
   };
-  return { base, newPage, requests, close };
+  return { base, newPage, requests, uploads, close };
 }

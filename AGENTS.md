@@ -51,6 +51,9 @@ kernels supply interval mechanics, and SQL supplies everything else.
 10. **Small and readable.** No planning documents, agent state or ADR piles in the repo;
     git history and GitHub issues hold the path. Keep changes focused, and state in the
     commit or PR which checks were actually run.
+    Upstream provenance cites code, tests and fixtures at a pinned commit, never
+    upstream process documents (ADRs, specs' decision logs, ledgers); state our rules
+    in our own words.
 
 ## Checks
 

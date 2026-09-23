@@ -9,6 +9,8 @@
 // file without probing for a .tbi/.csi index, which in the browser would be wasted
 // same-origin requests.
 
+import { readPeaks, peakWarnings } from "./peaks.js";
+
 export const CATEGORIES = ["promoter", "utr5", "utr3", "exon", "intron", "intergenic"];
 
 export const CATEGORY_LABELS = {
@@ -48,7 +50,7 @@ function nonNegativeInt(value, name) {
   return n;
 }
 
-/** GFF3 or GTF, from `##gff-version 3` or the attribute syntax of the name. */
+/** GFF3 or GTF, from `##gff-version 3` or the original filename (blob URLs have no suffix). */
 function annotationFormat(url, headerLines) {
   if (headerLines.some((l) => /^##gff-version\s+3\b/.test(l))) return "gff3";
   if (/\.gtf(\.gz)?$/i.test(url)) return "gtf";
@@ -68,26 +70,35 @@ function featureSql(format, url) {
       WHEN 'exon' THEN 'exon' WHEN 'cds' THEN 'cds'
       WHEN 'five_prime_utr' THEN 'utr5' WHEN 'three_prime_utr' THEN 'utr3'
       WHEN 'utr' THEN 'utr' END`;
-  const common = `
-CREATE OR REPLACE TEMP TABLE feature AS
-SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
-       lower(feature) AS type, ${kind} AS kind, attributes_map AS a
-FROM ${reader}(${lit(url)}, attributes_map := true, scan_mode := 'sequential');`;
+  // Attributes are extracted per key and only on the rows that use that key, rather
+  // than parsing every row into a MAP: on GENCODE the MAP cost ~8 of ~9 s natively.
+  const attr = (key) => format === "gtf"
+    ? `nullif(regexp_extract(attributes, '(?:^|;)\\s*${key}\\s+"([^"]*)"', 1), '')`
+    : `nullif(regexp_extract(attributes, '(?:^|;)\\s*${key}=([^;]*)', 1), '')`;
 
   if (format === "gtf") {
-    return `${common}
+    // GTF links by transcript_id; the type keys are read on exon and transcript lines.
+    return `
+CREATE OR REPLACE TEMP TABLE feature AS
+SELECT seqname, ckey, s, e, strand, type, kind,
+       CASE WHEN kind IS NOT NULL OR type = 'transcript' THEN ${attr("transcript_id")} END AS transcript_id,
+       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr("transcript_type")} END AS transcript_type,
+       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr("gene_type")} END AS gene_type
+FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
+             lower(feature) AS type, ${kind} AS kind, attributes
+      FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
 CREATE OR REPLACE TEMP TABLE part AS
-SELECT a['transcript_id'] AS tx, ckey, s, e, strand, kind
-FROM feature WHERE kind IS NOT NULL AND a['transcript_id'] IS NOT NULL;
+SELECT transcript_id AS tx, ckey, s, e, strand, kind
+FROM feature WHERE kind IS NOT NULL AND transcript_id IS NOT NULL;
 CREATE OR REPLACE TEMP TABLE tx AS
 WITH exon_span AS (
-  SELECT a['transcript_id'] AS tx, any_value(ckey) AS ckey, min(s) AS s, max(e) AS e,
+  SELECT transcript_id AS tx, any_value(ckey) AS ckey, min(s) AS s, max(e) AS e,
          any_value(strand) AS strand,
-         any_value(coalesce(a['transcript_type'], a['gene_type'])) AS biotype
-  FROM feature WHERE kind = 'exon' AND a['transcript_id'] IS NOT NULL GROUP BY 1
+         any_value(coalesce(transcript_type, gene_type)) AS biotype
+  FROM feature WHERE kind = 'exon' AND transcript_id IS NOT NULL GROUP BY 1
 ), line AS (
-  SELECT a['transcript_id'] AS tx, any_value(s) AS s, any_value(e) AS e, any_value(strand) AS strand,
-         any_value(coalesce(a['transcript_type'], a['gene_type'])) AS biotype
+  SELECT transcript_id AS tx, any_value(s) AS s, any_value(e) AS e, any_value(strand) AS strand,
+         any_value(coalesce(transcript_type, gene_type)) AS biotype
   FROM feature WHERE type = 'transcript' GROUP BY 1
 )
 SELECT x.tx, x.ckey, coalesce(l.s, x.s) AS s, coalesce(l.e, x.e) AS e,
@@ -95,19 +106,32 @@ SELECT x.tx, x.ckey, coalesce(l.s, x.s) AS s, coalesce(l.e, x.e) AS e,
 FROM exon_span x LEFT JOIN line l USING (tx);`;
   }
 
-  return `${common}
+  // GFF3 links by ID/Parent. Parts (exon, CDS, UTR) need only Parent. Transcripts and
+  // genes are among the non-part rows, which also carry ID and the type keys.
+  return `
+CREATE OR REPLACE TEMP TABLE feature AS
+SELECT seqname, ckey, s, e, strand, type, kind,
+       ${attr("Parent")} AS parent,
+       CASE WHEN kind IS NULL THEN ${attr("ID")} END AS id,
+       CASE WHEN kind IS NULL THEN ${attr("transcript_type")} END AS transcript_type,
+       CASE WHEN kind IS NULL THEN ${attr("gene_type")} END AS gene_type
+FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
+             lower(feature) AS type, ${kind} AS kind, attributes
+      FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
 CREATE OR REPLACE TEMP TABLE part AS
-SELECT url_decode(trim(p.tx)) AS tx, ckey, s, e, strand, kind
-FROM feature, unnest(string_split(a['Parent'], ',')) AS p(tx)
-WHERE kind IS NOT NULL;
+SELECT CASE WHEN contains(t, '%') THEN url_decode(t) ELSE t END AS tx, ckey, s, e, strand, kind
+FROM (SELECT trim(p.tx) AS t, ckey, s, e, strand, kind
+      FROM feature, unnest(string_split(parent, ',')) AS p(tx)
+      WHERE kind IS NOT NULL);
 CREATE OR REPLACE TEMP TABLE tx AS
 WITH id AS (
-  SELECT url_decode(a['ID']) AS id, ckey, s, e, strand, a FROM feature WHERE a['ID'] IS NOT NULL
+  SELECT url_decode(id) AS id, ckey, s, e, strand, parent, transcript_type, gene_type
+  FROM feature WHERE id IS NOT NULL
 )
 SELECT t.id AS tx, t.ckey, t.s, t.e, t.strand,
-       coalesce(t.a['transcript_type'], t.a['gene_type'], g.a['gene_type']) AS biotype
+       coalesce(t.transcript_type, t.gene_type, g.gene_type) AS biotype
 FROM id t
-LEFT JOIN id g ON g.id = url_decode(t.a['Parent'])
+LEFT JOIN id g ON g.id = url_decode(t.parent)
 WHERE t.id IN (SELECT tx FROM part WHERE kind = 'exon');`;
 }
 
@@ -176,29 +200,29 @@ FROM piece WHERE e IS NOT NULL`,
 }
 
 /** Counts per category for one peak file: peak centres or peak base pairs. */
-function peakCountSql(url, partitionIndex, mode) {
+function peakCountSql(fid, partitionIndex, mode) {
   const peaks = `
-WITH peak AS (
-  SELECT chrom, duckhts_contig_key(chrom) AS ckey, start AS s, "end" AS e
-  FROM read_bed(${lit(url)}, scan_mode := 'sequential')
-), marked AS (
-  SELECT *, ckey IN (SELECT DISTINCT ckey FROM feature) AS matched FROM peak
+WITH marked AS (
+  SELECT *, ckey IN (SELECT ckey FROM annotation_contig) AS matched
+  FROM peak WHERE fid = ${fid} AND reason IS NULL
 )`;
   const hitPriority = `coalesce(list_min(list_transform(
       duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, c, c + 1), h -> h.label::INTEGER)),
       ${PRIORITY.intergenic})`;
   if (mode === "bp") {
-    return `${peaks}
-SELECT priority, sum(n)::BIGINT AS n FROM (
-  SELECT h.label::INTEGER AS priority, least(e, h.interval_end) - greatest(s, h.interval_start) AS n
-  FROM marked, unnest(duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e)) AS u(h)
-  WHERE matched
-  UNION ALL
-  SELECT ${PRIORITY.intergenic}, (e - s) - coalesce(list_sum(list_transform(
-      duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e),
-      h -> least(e, h.interval_end) - greatest(s, h.interval_start))), 0)
+    const genic = CATEGORIES.filter((c) => c !== "intergenic");
+    return `${peaks}, covered AS MATERIALIZED (
+  SELECT s, e, duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, s, e) AS hits
   FROM marked WHERE matched
-) GROUP BY priority
+), tally AS (
+  SELECT coalesce(sum(e - s), 0)::BIGINT AS total,
+    ${genic.map((c) => `coalesce(sum(list_sum(list_transform(hits, h ->
+      CASE WHEN h.label::INTEGER = ${PRIORITY[c]} THEN least(e, h.interval_end) - greatest(s, h.interval_start)
+      ELSE 0 END))), 0)::BIGINT AS ${c}`).join(",\n    ")}
+  FROM covered
+)
+${genic.map((c) => `SELECT ${PRIORITY[c]} AS priority, ${c} AS n FROM tally`).join("\nUNION ALL ")}
+UNION ALL SELECT ${PRIORITY.intergenic}, total - (${genic.join(" + ")}) FROM tally
 UNION ALL SELECT -1, count(*) FILTER (matched) FROM marked
 UNION ALL SELECT -2, count(*) FILTER (NOT matched) FROM marked
 UNION ALL SELECT -3, sum(e - s) FILTER (NOT matched) FROM marked`;
@@ -217,7 +241,7 @@ function backgroundSql() {
   return `
 WITH len AS (
   SELECT ckey, max(length) AS length FROM chrom_length
-  WHERE ckey IN (SELECT DISTINCT ckey FROM feature) GROUP BY ckey
+  WHERE ckey IN (SELECT ckey FROM annotation_contig) GROUP BY ckey
 ), covered AS (
   SELECT g.priority, sum(least(g.e, len.length) - g.s) AS n
   FROM segment g JOIN len USING (ckey) WHERE g.s < len.length GROUP BY g.priority
@@ -245,13 +269,17 @@ function countsFrom(rows) {
  * @param {import("@duckdb/duckdb-wasm").AsyncDuckDBConnection} conn with DuckHTS loaded
  * @param {object} request
  * @param {string} request.annotation URL of a GFF3 or GTF file, plain or gzipped
+ * @param {string} [request.annotationName] Original filename, required for GTF blob URLs
  * @param {{url: string, label: string}[]} request.peaks BED/narrowPeak/broadPeak URLs
  * @param {object} [request.settings] see DEFAULT_SETTINGS
  * @param {object} [observer] Optional phase observer for benchmarking.
  * @param {(phase: string) => void} [observer.onPhase]
  * @returns {Promise<{results: object[], background: object | null, meta: object, warnings: string[]}>}
  */
-export async function annotate(conn, { annotation, peaks, settings: given = {} }, { onPhase = () => {} } = {}) {
+export async function annotate(conn, { annotation, annotationName = annotation, peaks, settings: given = {} },
+  { onPhase = () => {}, cache, files } = {}) {
+  const persistent = !!cache;
+  cache ??= {};
   const settings = { ...DEFAULT_SETTINGS, ...given };
   nonNegativeInt(settings.promoterUpstream, "Promoter upstream");
   nonNegativeInt(settings.promoterDownstream, "Promoter downstream");
@@ -266,55 +294,67 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
   const warnings = [];
 
   onPhase("partition");
-  // Header lines: format, assembly and ##sequence-region lengths.
-  const headerLines = (
-    await rows(`SELECT line FROM (
-      SELECT column0 AS line FROM read_csv(${lit(annotation)}, header = false, delim = '\\t',
-        quote = '', escape = '', null_padding = true, all_varchar = true, auto_detect = false,
-        columns = {'column0': 'VARCHAR', 'c1': 'VARCHAR', 'c2': 'VARCHAR', 'c3': 'VARCHAR',
-                   'c4': 'VARCHAR', 'c5': 'VARCHAR', 'c6': 'VARCHAR', 'c7': 'VARCHAR', 'c8': 'VARCHAR'})
-      LIMIT 100000) WHERE starts_with(line, '#')`)
-  ).map((r) => r.line);
-  const format = annotationFormat(annotation, headerLines);
-  const assembly = headerLines.map((l) => ASSEMBLY.exec(l)?.[1]).find(Boolean) ?? null;
-  const lengths = headerLines
-    .filter((l) => l.startsWith("##sequence-region"))
-    .map((l) => l.trim().split(/\s+/))
-    .filter((f) => f.length >= 4 && Number.isInteger(Number(f[3])))
-    .map(([, chrom, , end]) => `(duckhts_contig_key(${lit(chrom)}), ${Number(end)})`);
-  await run(`CREATE OR REPLACE TEMP TABLE chrom_length (ckey VARCHAR, length BIGINT)`);
-  if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
-
-  await run(featureSql(format, annotation));
-  if (settings.proteinCodingOnly) {
-    const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
-    if (Number(typed) === 0) {
-      settings.proteinCodingOnly = false;
-      warnings.push("The annotation has no transcript_type or gene_type, so every transcript was kept.");
-    }
-  }
-  await run(categorySql(settings));
-
-  const id = ++runCounter;
-  const categoryIndex = `category_${id}`;
-  const partitionIndex = `partition_${id}`;
-  for (const statement of partitionSql(categoryIndex, partitionIndex)) await conn.query(statement);
-
-  onPhase("count");
   try {
+    const sourceKey = JSON.stringify([annotation, annotationName]);
+    if (cache.sourceKey !== sourceKey) {
+      await clearAnnotation(conn, cache);
+      // Header metadata is read once alongside the full feature scan.
+      const headerLines = (
+        await rows(`SELECT raw FROM read_hts_header(${lit(annotation)}, format := 'tabix', mode := 'raw') ORDER BY idx`)
+      ).map((r) => r.raw);
+      cache.format = annotationFormat(annotationName, headerLines);
+      cache.assembly = headerLines.map((l) => ASSEMBLY.exec(l)?.[1]).find(Boolean) ?? null;
+      const lengths = headerLines
+        .filter((l) => l.startsWith("##sequence-region"))
+        .map((l) => l.trim().split(/\s+/))
+        .filter((f) => f.length >= 4 && Number.isInteger(Number(f[3])))
+        .map(([, chrom, , end]) => `(duckhts_contig_key(${lit(chrom)}), ${Number(end)})`);
+      await run(`CREATE OR REPLACE TEMP TABLE chrom_length (ckey VARCHAR, length BIGINT)`);
+      if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
+      await run(featureSql(cache.format, annotation));
+      await run(`CREATE OR REPLACE TEMP TABLE annotation_contig AS SELECT DISTINCT ckey FROM feature`);
+      const [{ features }] = await rows(`SELECT count(*) AS features FROM feature WHERE ckey IS NOT NULL AND s >= 0 AND e > s`);
+      if (Number(features) === 0) throw new Error("No annotation features could be read. Check the annotation format and compression.");
+      cache.sourceKey = sourceKey;
+    }
+    if (settings.proteinCodingOnly) {
+      const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
+      if (Number(typed) === 0) {
+        settings.proteinCodingOnly = false;
+        warnings.push("The annotation has no transcript_type or gene_type, so every transcript was kept.");
+      }
+    }
+    const categoryKey = JSON.stringify([settings.promoterUpstream, settings.promoterDownstream, settings.proteinCodingOnly]);
+    if (cache.categoryKey !== categoryKey) {
+      if (cache.partitionIndex) await conn.query(`SELECT duckhts_cgranges_destroy(${lit(cache.partitionIndex)})`);
+      await run(categorySql(settings));
+      const id = ++runCounter;
+      cache.categoryIndex = `category_${id}`;
+      cache.partitionIndex = `partition_${id}`;
+      for (const statement of partitionSql(cache.categoryIndex, cache.partitionIndex)) await conn.query(statement);
+      delete cache.categoryIndex;
+      cache.categoryKey = categoryKey;
+      cache.background = undefined;
+    }
+    const { partitionIndex, format, assembly } = cache;
+    onPhase("count");
+    files ??= await readPeaks(conn, peaks);
     const results = [];
-    for (const { url, label } of peaks) {
-      const { counts, extra } = countsFrom(await rows(peakCountSql(url, partitionIndex, settings.mode)));
+    for (const file of files) {
+      const { fid, label, error, rejected, rejectedCount } = file;
+      warnings.push(...peakWarnings(file));
+      const { counts, extra } = countsFrom(await rows(peakCountSql(fid, partitionIndex, settings.mode)));
       const matchedPeaks = extra[-1];
       const unmatchedPeaks = extra[-2];
       const matched = CATEGORIES.reduce((n, c) => n + counts[c], 0);
       const unmatchedChroms = (
-        await rows(`SELECT DISTINCT chrom FROM read_bed(${lit(url)}, scan_mode := 'sequential')
-          WHERE duckhts_contig_key(chrom) NOT IN (SELECT DISTINCT ckey FROM feature) ORDER BY chrom`)
+        await rows(`SELECT DISTINCT trim(raw_chrom) AS chrom FROM peak
+          WHERE fid = ${fid} AND reason IS NULL
+            AND ckey NOT IN (SELECT ckey FROM annotation_contig) ORDER BY chrom`)
       ).map((r) => r.chrom);
       const total = matchedPeaks + unmatchedPeaks;
       results.push({
-        label,
+        label, error, rejected, rejectedCount,
         mode: settings.mode,
         counts,
         matched,
@@ -331,11 +371,14 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
     let background = null;
     const [{ known }] = await rows(`SELECT count(*) AS known FROM chrom_length`);
     if (Number(known) > 0) {
-      const { counts, extra } = countsFrom(await rows(backgroundSql()));
-      background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
-      for (const { url, label } of peaks) {
-        const [{ past }] = await rows(`SELECT count(*) AS past FROM read_bed(${lit(url)}, scan_mode := 'sequential') b
-          JOIN chrom_length l ON l.ckey = duckhts_contig_key(b.chrom) WHERE b."end" > l.length`);
+      if (!cache.background) {
+        const { counts, extra } = countsFrom(await rows(backgroundSql()));
+        cache.background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
+      }
+      background = cache.background;
+      for (const { fid, label } of files) {
+        const [{ past }] = await rows(`SELECT count(*) AS past FROM peak b
+          JOIN chrom_length l USING (ckey) WHERE fid = ${fid} AND reason IS NULL AND b.e > l.length`);
         if (Number(past) > 0) {
           warnings.push(`${label}: ${past} peak(s) extend past their chromosome's end. Is this the right genome build?`);
         }
@@ -347,8 +390,21 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
     const [{ transcripts }] = await rows(`SELECT count(*) AS transcripts FROM used_tx`);
     const meta = { annotation, format, assembly, transcripts: Number(transcripts), settings };
     return { results, background, meta, warnings };
+  } catch (error) {
+    await clearAnnotation(conn, cache);
+    throw error;
   } finally {
-    await conn.query(`SELECT duckhts_cgranges_destroy(${lit(partitionIndex)})`);
+    if (!persistent) await clearAnnotation(conn, cache);
     onPhase("done");
   }
+}
+
+export async function clearAnnotation(conn, cache) {
+  for (const name of [cache.categoryIndex, cache.partitionIndex].filter(Boolean)) {
+    await conn.query(`SELECT duckhts_cgranges_destroy(${lit(name)})`);
+  }
+  for (const table of ["feature", "part", "tx", "used_tx", "category_interval", "segment", "chrom_length", "annotation_contig"]) {
+    await conn.query(`DROP TABLE IF EXISTS ${table}`);
+  }
+  for (const key of Object.keys(cache)) delete cache[key];
 }

@@ -5,6 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { CATEGORIES } from "../src/annotate.js";
+import { assertW2 } from "./w2-counts.mjs";
 
 const [input, engine, output] = process.argv.slice(2);
 assert.ok(["native-1t", "native-nt"].includes(engine));
@@ -61,6 +62,7 @@ for (const [i, block] of blocks.entries()) {
   }
 }
 assert.equal(peak, request.peaks.length);
+if (request.annotation.includes("/W2/")) assertW2(counts_centre);
 seconds.total = seconds.partition + seconds.count;
 const memory = await readFile(rssFile, "utf8");
 const rss_kb = Number(/Maximum resident set size \(kbytes\): (\d+)/.exec(memory)[1]);

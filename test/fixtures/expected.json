@@ -1,7 +1,7 @@
 {
   "_comment": [
     "Expected results for fixture.gff3 / fixture.gtf with peaks.bed.",
-    "Worked out BY HAND before any code existed (see adr/0014). Never edit these",
+    "Worked out BY HAND upstream (seandavi/peakwhere test/fixtures) before any code existed. Never edit these",
     "to make a test pass: a mismatch is a bug in the code or a decision to revisit.",
     "Settings: promoter 1000 bp upstream and 1000 bp downstream of the TSS base,",
     "priority Promoter > 5'UTR > 3'UTR > Exon > Intron > Intergenic, all transcripts."
