@@ -55,7 +55,7 @@ index. Here is the annotation as `read_gff` sees it:
 SELECT feature, count(*) AS n
 FROM read_gff('examples/gencode.vM25.basic.chr19.gff3.gz', scan_mode := 'sequential')
 GROUP BY feature
-ORDER BY n DESC
+ORDER BY n DESC, feature
 LIMIT 6;
 #> ┌─────────────────┬───────┐
 #> │     feature     │   n   │
@@ -66,7 +66,7 @@ LIMIT 6;
 #> │ five_prime_UTR  │  2429 │
 #> │ transcript      │  2303 │
 #> │ three_prime_UTR │  1577 │
-#> │ stop_codon      │  1553 │
+#> │ start_codon     │  1553 │
 #> └─────────────────┴───────┘
 ```
 
@@ -114,6 +114,25 @@ end-to-end test requires the page to reproduce every number:
 | H3K27me3 |      233 |    1 |   13 |   29 |    148 |        181 |
 | H3K36me3 |       96 |    5 |  226 |  440 |   2007 |         81 |
 | H3K4me3  |      594 |    1 |    8 |   30 |    148 |         78 |
+
+## Performance
+
+Local W1 (7,220 thymus chr19 peaks) and W2 (full-genome versions of the
+same files) analysis totals in seconds, **median \[min–max\]** of five
+runs after one warm-up. A failed workload has no reported timings.
+Native replays the app’s exact SQL over the same local HTTP inputs;
+ChIPseeker uses one-base peak centres but has different annotation
+rules, so these are not equal-output speedups. Startup-inclusive times,
+correctness gates, category differences, environment and reproduction
+commands are in the [performance report](benchmarks/performance.md). W1
+matches the independent fixture; W2 has exact three-engine SQL
+agreement, but its oracle timed out at 120 seconds and has a
+chromosome-scope limitation described in the report.
+
+| Workload | wasm                     | native-1t             | native-nt             | chipseeker               |
+|:---------|:-------------------------|:----------------------|:----------------------|:-------------------------|
+| W1       | 0.728 \[0.720–0.765\]    | 0.401 \[0.390–0.405\] | 0.370 \[0.368–0.380\] | 2.776 \[2.645–3.009\]    |
+| W2       | 13.623 \[13.568–13.704\] | 9.699 \[9.655–9.758\] | 7.395 \[7.385–7.444\] | 25.782 \[25.746–25.805\] |
 
 ## Limitations
 
