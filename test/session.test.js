@@ -78,7 +78,8 @@ test("console reads preserve the annotation cache; state changes force a rebuild
     const request = { annotation: `${base}fixture.gff3`,
       peaks: [{ url: `${base}peaks.bed`, label: "p" }] };
     const runs = [];
-    for (const sql of ["SELECT count(*) FROM tx", "DROP TABLE tx",
+    for (const sql of ["SELECT count(*) FROM tx", "-- the console's examples open with a comment\n/* like this */ SELECT count(*) FROM tx",
+      "DROP TABLE tx",
       "SELECT duckhts_cgranges_destroy('console_probe')", "SELECT 1; SELECT 2"]) {
       await window.clearSession();
       await window.runSession("where", request);
@@ -96,11 +97,9 @@ test("console reads preserve the annotation cache; state changes force a rebuild
   for (const run of got) {
     for (const [category, count] of Object.entries(run.counts)) assert.equal(count, expected.counts_centre[category]);
   }
-  assert.doesNotMatch(got[0].sql, /read_gff|read_gtf|read_bed/);
-  for (const run of got.slice(1)) assert.match(run.sql, /FROM read_gff\(/);
-  assert.equal(got[1].error, null);
-  assert.equal(got[2].error, null);
-  assert.equal(got[3].error, null);
+  for (const run of got.slice(0, 2)) assert.doesNotMatch(run.sql, /read_gff|read_gtf|read_bed/);
+  for (const run of got.slice(2)) assert.match(run.sql, /FROM read_gff\(/);
+  for (const run of got) assert.equal(run.error, null);
 });
 
 test("percent-encoded and plain Parent links share a multi-parent exon", async () => {

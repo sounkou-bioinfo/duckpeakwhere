@@ -6,7 +6,8 @@ import { createPeakStore } from "./peaks.js";
 // Conservative: ambiguous scripts are treated as writes. The three cgranges probes
 // are read-only; every other cgranges call may change an index.
 function changesState(sql) {
-  const statement = sql.trim().replace(/;\s*$/, "");
+  // Leading comments don't change what runs; the console's examples start with one.
+  const statement = sql.replace(/^(?:\s|--[^\n]*|\/\*[\s\S]*?\*\/)*/, "").replace(/;\s*$/, "").trim();
   return !/^(?:SELECT|WITH|FROM|SHOW|DESCRIBE|SUMMARIZE|EXPLAIN)\b/i.test(statement) ||
     statement.includes(";") ||
     /\b(?:INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|COPY|CALL|ATTACH|DETACH|TRUNCATE|MERGE|SET|RESET|PRAGMA)\b/i.test(statement) ||
