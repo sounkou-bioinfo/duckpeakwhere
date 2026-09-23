@@ -97,14 +97,17 @@ function featureSql(format, url) {
     const tx = "transcript_id || chr(31) || ckey || strand";
     return `
 CREATE OR REPLACE TEMP TABLE feature AS
-SELECT seqname, ckey, s, e, strand, type, kind,
-       CASE WHEN kind IS NOT NULL OR type = 'transcript' THEN ${attr("transcript_id")} END AS transcript_id,
-       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr(TRANSCRIPT_TYPE)} END AS transcript_type,
-       CASE WHEN kind = 'exon' OR type IN ('transcript', 'gene') THEN ${attr(GENE_TYPE)} END AS gene_type,
-       CASE WHEN kind = 'exon' OR type IN ('transcript', 'gene') THEN ${attr("gene_id")} END AS gene_id
-FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
-             lower(feature) AS type, ${kind} AS kind, attributes
-      FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
+SELECT * EXCLUDE (attributes),
+       CASE WHEN type = 'gene' OR ((kind = 'exon' OR type = 'transcript')
+         AND transcript_type IS NULL AND gene_type IS NULL) THEN ${attr("gene_id")} END AS gene_id
+FROM (
+  SELECT seqname, ckey, s, e, strand, type, kind, attributes,
+         CASE WHEN kind IS NOT NULL OR type = 'transcript' THEN ${attr("transcript_id")} END AS transcript_id,
+         CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr(TRANSCRIPT_TYPE)} END AS transcript_type,
+         CASE WHEN kind = 'exon' OR type IN ('transcript', 'gene') THEN ${attr(GENE_TYPE)} END AS gene_type
+  FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
+               lower(feature) AS type, ${kind} AS kind, attributes
+        FROM ${reader}(${lit(url)}, scan_mode := 'sequential')));
 CREATE OR REPLACE TEMP TABLE part AS
 SELECT ${tx} AS tx, ckey, s, e, strand, kind
 FROM feature WHERE kind IS NOT NULL AND transcript_id IS NOT NULL;
