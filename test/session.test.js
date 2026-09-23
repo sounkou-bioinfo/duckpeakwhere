@@ -37,6 +37,7 @@ test("session invalidates only dependent tables and shares peak reads across vie
     await run("annotation");
     await window.clearSession();
     runs.tables = await window.query("SELECT table_name FROM duckdb_tables() WHERE temporary");
+    runs.plans = window.takePlans();
     return runs;
   });
   assert.equal((runs.first.sql.match(/FROM read_bed\(/g) ?? []).length, 1);
@@ -59,6 +60,23 @@ test("session invalidates only dependent tables and shares peak reads across vie
   assert.match(runs.annotation.sql, /FROM read_gtf\(/);
   assert.doesNotMatch(runs.annotation.sql, /read_bed/);
   assert.deepEqual(runs.tables, []);
+  assert.equal(runs.plans.length, 1);
+  assert.match(runs.plans[0], /BLOCKWISE_NL_JOIN/);
+  assert.match(runs.plans[0], /peek_bin_grid/);
+  assert.match(runs.plans[0], /peek_valid/);
+});
+
+test("percent-encoded and plain Parent links share a multi-parent exon", async () => {
+  const got = await page.evaluate(async () => {
+    const base = `${location.origin}/test/fixtures/`;
+    await window.clearSession();
+    const result = await window.runSession("where", { annotation: `${base}encoded.gff3`,
+      peaks: [{ url: `${base}peek/accepted.bed`, label: "p" }] });
+    const parts = await window.query("SELECT tx, s, e FROM part ORDER BY tx");
+    return { transcripts: result.meta.transcripts, parts };
+  });
+  assert.equal(got.transcripts, 2);
+  assert.deepEqual(got.parts, [{ tx: "tx%one", s: 100n, e: 200n }, { tx: "tx-two", s: 100n, e: 200n }]);
 });
 
 test("cached counts equal uncached analyses for each settings change", async () => {

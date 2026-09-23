@@ -7,14 +7,18 @@
   import { peek } from "../src/peek.js";
   import { createSession } from "../src/session.js";
   const ready = openDatabase();
-  const queries = [];
-  const session = ready.then(({ conn }) => createSession({ query(sql) {
+  const queries = [], plans = [];
+  const session = ready.then(({ conn }) => createSession({ async query(sql) {
     queries.push(sql);
+    if (sql.includes("FROM peek_bin_grid b LEFT JOIN")) {
+      plans.push((await conn.query(`EXPLAIN ${sql}`)).toArray().map((r) => r.explain_value).join("\n"));
+    }
     return conn.query(sql);
   } }));
   window.runSession = async (view, request) => (await session).run(view, request);
   window.clearSession = async () => (await session).clear();
   window.takeQueries = () => queries.splice(0);
+  window.takePlans = () => plans.splice(0);
   window.annotateUrls = async (request) => {
     const { conn } = await ready;
     const absolute = (u) => new URL(u, location.href).href;

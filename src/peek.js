@@ -58,11 +58,13 @@ export async function peek(conn, { peaks }, { files } = {}) {
         CASE WHEN i = 0 THEN lo ELSE exp(ln(lo) + i * ((ln(hi) - ln(lo)) / 30)) END AS "from",
         CASE WHEN i = 29 THEN hi ELSE exp(ln(lo) + (i + 1) * ((ln(hi) - ln(lo)) / 30)) END AS "to"
       FROM bounds, range(30) t(i) WHERE lo IS NOT NULL`);
-    const histogram = await rows(conn, `SELECT f.fid, b.bin, b."from", b."to", count(v.rid) AS n
-      FROM (VALUES ${files.map(({ fid }) => `(${fid})`).join(",")}) f(fid) CROSS JOIN peek_bins b
-      LEFT JOIN peek_valid v ON v.fid = f.fid AND v.w >= b."from"
+    await conn.query(`CREATE OR REPLACE TEMP TABLE peek_bin_grid AS
+      SELECT f.fid, b.* FROM (VALUES ${files.map(({ fid }) => `(${fid})`).join(",")}) f(fid)
+      CROSS JOIN peek_bins b`);
+    const histogram = await rows(conn, `SELECT b.fid, b.bin, b."from", b."to", count(v.rid) AS n
+      FROM peek_bin_grid b LEFT JOIN peek_valid v ON v.fid = b.fid AND v.w >= b."from"
         AND (v.w < b."to" OR (b.bin = 29 AND v.w <= b."to"))
-      GROUP BY ALL ORDER BY f.fid, b.bin`);
+      GROUP BY ALL ORDER BY b.fid, b.bin`);
     const extremes = await rows(conn, `WITH ranked AS (
         SELECT *, row_number() OVER (PARTITION BY fid ORDER BY w, rid) AS smallest,
           row_number() OVER (PARTITION BY fid ORDER BY w DESC, rid) AS largest FROM peek_valid)
@@ -85,7 +87,7 @@ export async function peek(conn, { peaks }, { files } = {}) {
     return { results, aligned };
   } finally {
     if (indexed) await conn.query(`SELECT duckhts_cgranges_destroy('peek')`);
-    for (const table of ["peek_valid", "peek_span", "peek_bins"]) {
+    for (const table of ["peek_valid", "peek_span", "peek_bins", "peek_bin_grid"]) {
       await conn.query(`DROP TABLE IF EXISTS ${table}`);
     }
   }

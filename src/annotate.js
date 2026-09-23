@@ -119,9 +119,10 @@ FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end"
              lower(feature) AS type, ${kind} AS kind, attributes
       FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
 CREATE OR REPLACE TEMP TABLE part AS
-SELECT url_decode(trim(p.tx)) AS tx, ckey, s, e, strand, kind
-FROM feature, unnest(string_split(parent, ',')) AS p(tx)
-WHERE kind IS NOT NULL;
+SELECT CASE WHEN contains(t, '%') THEN url_decode(t) ELSE t END AS tx, ckey, s, e, strand, kind
+FROM (SELECT trim(p.tx) AS t, ckey, s, e, strand, kind
+      FROM feature, unnest(string_split(parent, ',')) AS p(tx)
+      WHERE kind IS NOT NULL);
 CREATE OR REPLACE TEMP TABLE tx AS
 WITH id AS (
   SELECT url_decode(id) AS id, ckey, s, e, strand, parent, transcript_type, gene_type
