@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   downstreamEnabled: false,
   downstreamWindow: 1000,
   useSummits: false,
+  useChromSizes: false,
 });
 
 /** A file with more than this fraction of unmatched peaks is not drawn. */
@@ -269,7 +270,27 @@ UNION ALL SELECT -3, count(*) FILTER (NOT matched) FROM marked
 ${useSummits ? `UNION ALL SELECT -4, count(*) FILTER (NOT (${validSummit})) FROM marked` : ""}`;
 }
 
-/** Base pairs per category over chromosomes whose length the GFF3 header gives. */
+// UCSC chrom.sizes is tab-separated. Check lengths before reducing normalized
+// aliases so conflicting values cannot silently select a background denominator.
+function chromSizesSql(url) {
+  return `CREATE OR REPLACE TEMP TABLE chrom_length AS
+WITH checked AS (
+  SELECT CASE WHEN chrom IS NULL OR trim(chrom) = '' THEN error('Empty chromosome in chrom.sizes')
+              ELSE duckhts_contig_key(trim(chrom)) END AS ckey,
+         CASE WHEN length IS NULL OR NOT regexp_full_match(trim(length), '[0-9]+')
+                   OR try_cast(length AS BIGINT) IS NULL OR try_cast(length AS BIGINT) <= 0
+              THEN error('chrom.sizes length must be a positive integer')
+              ELSE cast(length AS BIGINT) END AS length
+  FROM read_csv(${lit(url)}, delim = '\\t', header = false, auto_detect = false,
+                columns = {'chrom': 'VARCHAR', 'length': 'VARCHAR'}, comment = '#')
+)
+SELECT ckey, CASE WHEN min(length) <> max(length)
+                 THEN error('Conflicting chromosome lengths in chrom.sizes: ' || ckey)
+                 ELSE max(length) END AS length
+FROM checked GROUP BY ckey;`;
+}
+
+/** Base pairs per category on annotated chromosomes with supplied lengths. */
 function backgroundSql() {
   return `
 WITH len AS (
@@ -304,12 +325,13 @@ function countsFrom(rows, settings) {
  * @param {string} request.annotation URL of a GFF3 or GTF file, plain or gzipped
  * @param {string} [request.annotationName] Original filename, required for GTF blob URLs
  * @param {{url: string, label: string, filename?: string}[]} request.peaks BED-family URLs; filename identifies narrowPeak blob URLs
+ * @param {string} [request.chromSizes] tab-separated contig/length file for annotations without sequence-region
  * @param {object} [request.settings] see DEFAULT_SETTINGS
  * @param {object} [observer] Optional phase observer for benchmarking.
  * @param {(phase: string) => void} [observer.onPhase]
  * @returns {Promise<{results: object[], background: object | null, meta: object, warnings: string[]}>}
  */
-export async function annotate(conn, { annotation, annotationName = annotation, peaks, settings: given = {} },
+export async function annotate(conn, { annotation, annotationName = annotation, peaks, chromSizes, settings: given = {} },
   { onPhase = () => {}, cache, files } = {}) {
   const persistent = !!cache;
   cache ??= {};
@@ -329,6 +351,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
 
   onPhase("partition");
   try {
+    if (settings.useChromSizes && !chromSizes) throw new Error("Choose a chrom.sizes file or turn off its setting.");
     const sourceKey = JSON.stringify([annotation, annotationName]);
     if (cache.sourceKey !== sourceKey) {
       await clearAnnotation(conn, cache);
@@ -343,13 +366,24 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
         .map((l) => l.trim().split(/\s+/))
         .filter((f) => f.length >= 4 && Number.isInteger(Number(f[3])))
         .map(([, chrom, , end]) => `(duckhts_contig_key(${lit(chrom)}), ${Number(end)})`);
-      await run(`CREATE OR REPLACE TEMP TABLE chrom_length (ckey VARCHAR, length BIGINT)`);
-      if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
+      await run(`CREATE OR REPLACE TEMP TABLE annotation_length (ckey VARCHAR, length BIGINT)`);
+      if (lengths.length) await run(`INSERT INTO annotation_length VALUES ${lengths.join(", ")}`);
+      cache.hasHeaderLengths = lengths.length > 0;
       await run(featureSql(cache.format, annotation));
       await run(`CREATE OR REPLACE TEMP TABLE annotation_contig AS SELECT DISTINCT ckey FROM feature`);
       const [{ features }] = await rows(`SELECT count(*) AS features FROM feature WHERE ckey IS NOT NULL AND s >= 0 AND e > s`);
       if (Number(features) === 0) throw new Error("No annotation features could be read. Check the annotation format and compression.");
       cache.sourceKey = sourceKey;
+    }
+    const lengthSource = settings.useChromSizes && !cache.hasHeaderLengths ? chromSizes : null;
+    if (cache.lengthSource !== lengthSource) {
+      await run(lengthSource ? chromSizesSql(lengthSource) :
+        "CREATE OR REPLACE TEMP TABLE chrom_length AS SELECT * FROM annotation_length");
+      cache.lengthSource = lengthSource;
+      cache.background = undefined;
+    }
+    if (settings.useChromSizes && cache.hasHeaderLengths) {
+      warnings.push("chrom.sizes was ignored because the annotation has ##sequence-region lengths.");
     }
     if (settings.proteinCodingOnly) {
       const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
@@ -415,6 +449,12 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
         cache.background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
       }
       background = cache.background;
+      if (lengthSource) {
+        const [{ missing }] = await rows(`SELECT count(*) AS missing FROM annotation_contig
+          WHERE ckey NOT IN (SELECT ckey FROM chrom_length)`);
+        if (Number(missing) > 0) warnings.push(`${missing} annotation contig(s) have no length in chrom.sizes and are excluded from the Genome bar.`);
+        if (background.total === 0) background = null;
+      }
       for (const { fid, label } of files) {
         const [{ past }] = await rows(`SELECT count(*) AS past FROM peak b
           JOIN chrom_length l USING (ckey) WHERE fid = ${fid} AND reason IS NULL AND b.e > l.length`);
@@ -423,7 +463,8 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
         }
       }
     } else {
-      warnings.push("No chromosome lengths (a GTF has none), so the Genome bar is hidden.");
+      if (lengthSource) throw new Error("chrom.sizes contains no chromosome lengths.");
+      warnings.push("No chromosome lengths, so the Genome bar is hidden. Supply chrom.sizes for annotations without ##sequence-region.");
     }
 
     const [{ transcripts }] = await rows(`SELECT count(*) AS transcripts FROM used_tx`);
@@ -442,7 +483,7 @@ export async function clearAnnotation(conn, cache) {
   for (const name of [cache.categoryIndex, cache.partitionIndex].filter(Boolean)) {
     await conn.query(`SELECT duckhts_cgranges_destroy(${lit(name)})`);
   }
-  for (const table of ["feature", "part", "tx", "used_tx", "category_interval", "segment", "chrom_length", "annotation_contig"]) {
+  for (const table of ["feature", "part", "tx", "used_tx", "category_interval", "segment", "chrom_length", "annotation_length", "annotation_contig"]) {
     await conn.query(`DROP TABLE IF EXISTS ${table}`);
   }
   for (const key of Object.keys(cache)) delete cache[key];

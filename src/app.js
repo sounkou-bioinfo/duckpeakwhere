@@ -44,7 +44,8 @@ const LOCAL_UNSUPPORTED = "This signed DuckHTS build cannot read local files (bl
 let localAnnotation = null;
 let localPeaks = [];
 let localSupported = false;
-let session, reset = Promise.resolve();
+let session, db, reset = Promise.resolve();
+let localSizes = null, sizesSource = null, nextSizesId = 0;
 const sources = new Map();
 
 function releaseRemovedFiles() {
@@ -57,7 +58,22 @@ function releaseRemovedFiles() {
   }
 }
 
+function selectSizes(file) {
+  localSizes = file;
+  if (sizesSource) {
+    const previous = sizesSource;
+    reset = reset.then(() => db.dropFile(previous));
+    sizesSource = null;
+  }
+  if (!file) {
+    $("chrom-sizes").value = "";
+    $("use-chrom-sizes").checked = false;
+  }
+  $("output").hidden = true;
+}
+
 function clearLocalFiles() {
+  selectSizes(null);
   localAnnotation = null;
   localPeaks = [];
   releaseRemovedFiles();
@@ -155,6 +171,7 @@ function request() {
       downstreamEnabled: $("downstream-enabled").checked,
       downstreamWindow: Number($("downstream-window").value),
       useSummits: $("summits").checked,
+      useChromSizes: $("use-chrom-sizes").checked,
     },
   };
 }
@@ -238,12 +255,15 @@ async function main() {
   $("downstream-enabled").checked = DEFAULT_SETTINGS.downstreamEnabled;
   $("downstream-window").value = DEFAULT_SETTINGS.downstreamWindow;
   $("summits").checked = DEFAULT_SETTINGS.useSummits;
+  $("use-chrom-sizes").checked = DEFAULT_SETTINGS.useChromSizes;
   $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);
   showView();
   $("view").addEventListener("change", showView);
   $("clear-files").addEventListener("click", clearLocalFiles);
+  $("chrom-sizes").addEventListener("change", (e) => selectSizes(e.target.files[0] ?? null));
+  $("clear-chrom-sizes").addEventListener("click", () => selectSizes(null));
   for (const kind of ["annotation", "peaks"]) {
     $(kind === "annotation" ? "local-annotation" : "local-peaks").addEventListener("change", (event) => selectFiles(kind, event.target.files));
     const drop = $(`${kind}-drop`);
@@ -258,6 +278,7 @@ async function main() {
   try {
     const opened = await openDatabase();
     conn = opened.conn;
+    db = opened.db;
     session = createSession(conn);
     localSupported = await supportsLocalFiles(conn);
     $("local-status").textContent = localSupported ? "Local files are read in this tab; nothing is uploaded." : LOCAL_UNSUPPORTED;
@@ -285,6 +306,15 @@ async function main() {
     try {
       await reset;
       const input = request();
+      if (input.settings?.useChromSizes) {
+        if (!localSizes) throw new Error("Choose a chrom.sizes file or turn off its setting.");
+        if (!sizesSource) {
+          const path = `chrom-sizes-${++nextSizesId}.tsv`;
+          await db.registerFileBuffer(path, new Uint8Array(await localSizes.arrayBuffer()));
+          sizesSource = path;
+        }
+        input.chromSizes = sizesSource;
+      }
       const result = await session.run(isPeek ? "peek" : "where", input);
       // Shown before drawing so the charts can size themselves to the results column.
       $("output").hidden = false;

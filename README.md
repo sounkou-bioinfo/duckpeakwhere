@@ -144,6 +144,15 @@ here
 Choose **Local files** and pick or drop an annotation and peak files.
 They are read in place through `blob:` URLs, never uploaded.
 
+For annotations without `##sequence-region` lengths, select a
+**chrom.sizes** file and enable **Use chrom.sizes for the Genome
+background**. The file has two tab-separated columns (chromosome and
+positive integer length), without a header. DuckDB reads it locally;
+contig names are matched through `duckhts_contig_key`. Only contigs
+present in the annotation contribute to the Genome bar. Annotation
+header lengths take precedence; peak counts and chromosome matching are
+unchanged.
+
 Reading `blob:` URLs needs a DuckHTS release that includes it (merged,
 not yet released). Until then the page says so, and `?duckhts=dev` loads
 a pinned development build of DuckHTS that can.
@@ -156,7 +165,7 @@ a pinned development build of DuckHTS that can.
   [`docs/peakpeek.md`](docs/peakpeek.md).
 - The page needs a DuckDB 1.5 runtime of duckdb-wasm
   ([duckhts#247](https://github.com/RGenomicsETL/duckhts/issues/247)).
-- Not ported from peakwhere: chrom.sizes input and editable bar labels.
+- Editable bar labels are not available.
 
 ## Development
 
