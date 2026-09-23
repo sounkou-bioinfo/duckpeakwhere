@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   proteinCodingOnly: false,
   downstreamEnabled: false,
   downstreamWindow: 1000,
+  useSummits: false,
 });
 
 /** A file with more than this fraction of unmatched peaks is not drawn. */
@@ -227,8 +228,11 @@ FROM piece WHERE e IS NOT NULL`,
 }
 
 /** Counts per category for one peak file: peak centres or peak base pairs. */
-function peakCountSql(fid, partitionIndex, settings) {
+function peakCountSql({ fid, narrowPeak }, partitionIndex, settings) {
   const { mode } = settings;
+  const useSummits = settings.useSummits && narrowPeak;
+  const validSummit = "summit IS NOT NULL AND summit >= 0 AND summit < e - s";
+  const point = useSummits ? `CASE WHEN ${validSummit} THEN s + summit ELSE s + (e - s) // 2 END` : "s + (e - s) // 2";
   const peaks = `
 WITH marked AS (
   SELECT *, ckey IN (SELECT ckey FROM annotation_contig) AS matched
@@ -257,11 +261,12 @@ UNION ALL SELECT -3, sum(e - s) FILTER (NOT matched) FROM marked`;
   }
   return `${peaks}
 SELECT priority, count(*)::BIGINT AS n FROM (
-  SELECT ${hitPriority} AS priority FROM (SELECT *, s + (e - s) // 2 AS c FROM marked WHERE matched)
+  SELECT ${hitPriority} AS priority FROM (SELECT *, ${point} AS c FROM marked WHERE matched)
 ) GROUP BY priority
 UNION ALL SELECT -1, count(*) FILTER (matched) FROM marked
 UNION ALL SELECT -2, count(*) FILTER (NOT matched) FROM marked
-UNION ALL SELECT -3, count(*) FILTER (NOT matched) FROM marked`;
+UNION ALL SELECT -3, count(*) FILTER (NOT matched) FROM marked
+${useSummits ? `UNION ALL SELECT -4, count(*) FILTER (NOT (${validSummit})) FROM marked` : ""}`;
 }
 
 /** Base pairs per category over chromosomes whose length the GFF3 header gives. */
@@ -298,7 +303,7 @@ function countsFrom(rows, settings) {
  * @param {object} request
  * @param {string} request.annotation URL of a GFF3 or GTF file, plain or gzipped
  * @param {string} [request.annotationName] Original filename, required for GTF blob URLs
- * @param {{url: string, label: string}[]} request.peaks BED/narrowPeak/broadPeak URLs
+ * @param {{url: string, label: string, filename?: string}[]} request.peaks BED-family URLs; filename identifies narrowPeak blob URLs
  * @param {object} [request.settings] see DEFAULT_SETTINGS
  * @param {object} [observer] Optional phase observer for benchmarking.
  * @param {(phase: string) => void} [observer.onPhase]
@@ -373,7 +378,11 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
     for (const file of files) {
       const { fid, label, error, rejected, rejectedCount } = file;
       warnings.push(...peakWarnings(file));
-      const { counts, extra } = countsFrom(await rows(peakCountSql(fid, partitionIndex, settings)), settings);
+      const { counts, extra } = countsFrom(await rows(peakCountSql(file, partitionIndex, settings)), settings);
+      const summitFallbacks = extra[-4] ?? 0;
+      if (settings.mode === "centre" && settings.useSummits && file.narrowPeak && !error) {
+        warnings.push(`${label}: ${summitFallbacks} peak(s) fell back to the midpoint (missing or out-of-range summit).`);
+      }
       const matchedPeaks = extra[-1];
       const unmatchedPeaks = extra[-2];
       const matched = Object.values(counts).reduce((n, value) => n + value, 0);
@@ -384,7 +393,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
       ).map((r) => r.chrom);
       const total = matchedPeaks + unmatchedPeaks;
       results.push({
-        label, error, rejected, rejectedCount,
+        label, error, rejected, rejectedCount, summitFallbacks,
         mode: settings.mode,
         counts,
         matched,

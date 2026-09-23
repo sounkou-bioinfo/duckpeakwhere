@@ -136,7 +136,7 @@ function request() {
     return sources.get(file).url;
   };
   const peaks = isLocal
-    ? localPeaks.map((file) => ({ url: url(file), label: file.name }))
+    ? localPeaks.map((file) => ({ url: url(file), label: file.name, filename: file.name }))
     : [...$("peaks").querySelectorAll("input:checked")].map((box) => ({
       url: new URL(box.value, location.href).href,
       label: box.dataset.label,
@@ -154,6 +154,7 @@ function request() {
       proteinCodingOnly: $("coding").checked,
       downstreamEnabled: $("downstream-enabled").checked,
       downstreamWindow: Number($("downstream-window").value),
+      useSummits: $("summits").checked,
     },
   };
 }
@@ -177,7 +178,8 @@ function draw({ results, background, meta, warnings }) {
     }),
   );
 
-  const unit = meta.settings.mode === "bp" ? "base pairs" : "peak centres";
+  const unit = meta.settings.mode === "bp" ? "base pairs" :
+    meta.settings.useSummits ? "narrowPeak summits (midpoints otherwise)" : "peak centres";
   const { promoterUpstream: up, promoterDownstream: down } = meta.settings;
   $("summary").textContent =
     `Counting ${unit}; promoter ${up} bp upstream to ${down} bp downstream of the TSS; ` +
@@ -235,6 +237,7 @@ function draw({ results, background, meta, warnings }) {
 async function main() {
   $("downstream-enabled").checked = DEFAULT_SETTINGS.downstreamEnabled;
   $("downstream-window").value = DEFAULT_SETTINGS.downstreamWindow;
+  $("summits").checked = DEFAULT_SETTINGS.useSummits;
   $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);
