@@ -417,7 +417,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
       warnings.push(...peakWarnings(file));
       const { counts, extra } = countsFrom(await rows(peakCountSql(file, partitionIndex, settings)), settings);
       const summitFallbacks = extra[-4] ?? 0;
-      if (settings.mode === "centre" && settings.useSummits && file.narrowPeak && !error) {
+      if (summitFallbacks > 0 && settings.mode === "centre" && settings.useSummits && file.narrowPeak && !error) {
         warnings.push(`${label}: ${summitFallbacks} peak(s) fell back to the midpoint (missing or out-of-range summit).`);
       }
       const matchedPeaks = extra[-1];

@@ -45,6 +45,7 @@ test("narrowPeak summit offsets include zero and exclude the end; invalid offset
   assert.match(runs.on.warnings.join("\n"), /5 peak\(s\).*midpoint/);
   assert.deepEqual(runs.bp.results[0].counts, bp);
   assert.equal(runs.bp.results[0].summitFallbacks, 0);
+  assert.doesNotMatch(runs.bp.warnings.join("\n"), /fell back to the midpoint/);
   assert.deepEqual(runs.again.results[0].counts, midpoint);
   assert.doesNotMatch(runs.sql, /read_bed|read_gtf|read_hts_header|CREATE OR REPLACE TEMP TABLE/);
   for (const r of runs.formats.slice(0, 2)) {
@@ -66,6 +67,19 @@ test("unmatched chromosomes do not contribute summit fallbacks", async () => {
   assert.equal(result.results[0].peaks.unmatched, 1);
   assert.equal(result.results[0].summitFallbacks, 5);
   assert.match(result.warnings.join("\n"), /5 peak\(s\).*midpoint/);
+});
+
+test("valid narrowPeak summits do not emit a fallback warning", async () => {
+  const result = await page.evaluate(async () => {
+    await window.clearSession();
+    const base = `${location.origin}/test/fixtures/`;
+    return window.runSession("where", { annotation: `${base}gene-types.gtf`,
+      peaks: [{ url: `${base}summits-valid.narrowPeak`, label: "valid" }],
+      settings: { promoterUpstream: 0, promoterDownstream: 0, useSummits: true } });
+  });
+  assert.deepEqual(result.results[0].counts, { ...summit, exon: 2, intergenic: 0 });
+  assert.equal(result.results[0].summitFallbacks, 0);
+  assert.doesNotMatch(result.warnings.join("\n"), /fell back to the midpoint/);
 });
 
 test("signed read_bed exposes narrowPeak column 10 as block_count", async () => {
