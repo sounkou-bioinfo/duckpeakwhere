@@ -167,7 +167,9 @@ function draw({ results, background, meta, warnings }) {
     `${meta.assembly ? `, ${meta.assembly}` : ""}).`;
   const hidden = results
     .filter((r) => !r.drawn)
-    .map((r) => `${r.label}: not drawn, because more than 5% of its peaks are on chromosomes the annotation lacks.`);
+    .map((r) => `${r.label}: not drawn, ${r.error ? "because the file could not be read" :
+      r.peaks.matched + r.peaks.unmatched === 0 ? "because it has no accepted peaks" :
+      "because more than 5% of its peaks are on chromosomes the annotation lacks"}.`);
   $("warnings").replaceChildren(
     ...[...hidden, ...warnings].map((w) => {
       const li = document.createElement("li");

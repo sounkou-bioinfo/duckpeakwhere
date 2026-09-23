@@ -9,6 +9,8 @@
 // file without probing for a .tbi/.csi index, which in the browser would be wasted
 // same-origin requests.
 
+import { readPeaks, peakWarnings } from "./peaks.js";
+
 export const CATEGORIES = ["promoter", "utr5", "utr3", "exon", "intron", "intergenic"];
 
 export const CATEGORY_LABELS = {
@@ -197,13 +199,11 @@ FROM piece WHERE e IS NOT NULL`,
 }
 
 /** Counts per category for one peak file: peak centres or peak base pairs. */
-function peakCountSql(url, partitionIndex, mode) {
+function peakCountSql(fid, partitionIndex, mode) {
   const peaks = `
-WITH peak AS (
-  SELECT chrom, duckhts_contig_key(chrom) AS ckey, start AS s, "end" AS e
-  FROM read_bed(${lit(url)}, scan_mode := 'sequential')
-), marked AS (
-  SELECT *, ckey IN (SELECT DISTINCT ckey FROM feature) AS matched FROM peak
+WITH marked AS (
+  SELECT *, ckey IN (SELECT DISTINCT ckey FROM feature) AS matched
+  FROM peak WHERE fid = ${fid} AND reason IS NULL
 )`;
   const hitPriority = `coalesce(list_min(list_transform(
       duckhts_cgranges_overlaps_list(${lit(partitionIndex)}, ckey, c, c + 1), h -> h.label::INTEGER)),
@@ -321,19 +321,23 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
 
   onPhase("count");
   try {
+    const files = await readPeaks(conn, peaks);
     const results = [];
-    for (const { url, label } of peaks) {
-      const { counts, extra } = countsFrom(await rows(peakCountSql(url, partitionIndex, settings.mode)));
+    for (const file of files) {
+      const { fid, label, error, rejected, rejectedCount } = file;
+      warnings.push(...peakWarnings(file));
+      const { counts, extra } = countsFrom(await rows(peakCountSql(fid, partitionIndex, settings.mode)));
       const matchedPeaks = extra[-1];
       const unmatchedPeaks = extra[-2];
       const matched = CATEGORIES.reduce((n, c) => n + counts[c], 0);
       const unmatchedChroms = (
-        await rows(`SELECT DISTINCT chrom FROM read_bed(${lit(url)}, scan_mode := 'sequential')
-          WHERE duckhts_contig_key(chrom) NOT IN (SELECT DISTINCT ckey FROM feature) ORDER BY chrom`)
+        await rows(`SELECT DISTINCT trim(raw_chrom) AS chrom FROM peak
+          WHERE fid = ${fid} AND reason IS NULL
+            AND ckey NOT IN (SELECT DISTINCT ckey FROM feature) ORDER BY chrom`)
       ).map((r) => r.chrom);
       const total = matchedPeaks + unmatchedPeaks;
       results.push({
-        label,
+        label, error, rejected, rejectedCount,
         mode: settings.mode,
         counts,
         matched,
@@ -352,9 +356,9 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
     if (Number(known) > 0) {
       const { counts, extra } = countsFrom(await rows(backgroundSql()));
       background = { label: "Genome", background: true, mode: "bp", counts, total: extra[-1] };
-      for (const { url, label } of peaks) {
-        const [{ past }] = await rows(`SELECT count(*) AS past FROM read_bed(${lit(url)}, scan_mode := 'sequential') b
-          JOIN chrom_length l ON l.ckey = duckhts_contig_key(b.chrom) WHERE b."end" > l.length`);
+      for (const { fid, label } of files) {
+        const [{ past }] = await rows(`SELECT count(*) AS past FROM peak b
+          JOIN chrom_length l USING (ckey) WHERE fid = ${fid} AND reason IS NULL AND b.e > l.length`);
         if (Number(past) > 0) {
           warnings.push(`${label}: ${past} peak(s) extend past their chromosome's end. Is this the right genome build?`);
         }

@@ -1,40 +1,20 @@
 // PeakPeek's BED-family statistics: DuckHTS readers/overlap kernels, SQL reductions.
 // Compatibility: README.Rmd, PeakPeek SPEC §4 and ADRs 0001/0003/0004/0006/0007/0011.
-const lit = (value) => `'${String(value).replaceAll("'", "''")}'`;
+import { readPeaks } from "./peaks.js";
 const rows = async (conn, sql) => (await conn.query(sql)).toArray().map((row) =>
   Object.fromEntries(Object.entries(row.toJSON()).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])));
 
 /** No annotation needed. The caller owns input URLs until this promise settles. */
 export async function peek(conn, { peaks }) {
-  if (!peaks.length) throw new Error("Choose at least one peak file.");
-  const errors = new Map();
+  const files = await readPeaks(conn, peaks);
   let indexed = false;
   try {
-    await conn.query(`CREATE OR REPLACE TEMP TABLE peek_raw (
-      fid INTEGER, chrom VARCHAR, s BIGINT, e BIGINT, name VARCHAR)`);
-    for (const [fid, file] of peaks.entries()) {
-      try {
-        await conn.query(`INSERT INTO peek_raw SELECT ${fid}, trim(chrom), start, "end", name
-          FROM read_bed(${lit(file.url)}, scan_mode := 'sequential')`);
-      } catch (error) {
-        errors.set(fid, error.message);
-      }
-    }
-    await conn.query(`CREATE OR REPLACE TEMP TABLE peek_checked AS
-      SELECT *, CASE
-        WHEN chrom IS NULL OR chrom = '' THEN 'empty chromosome'
-        WHEN s IS NULL OR e IS NULL THEN 'non-integer or missing coordinate'
-        WHEN s < 0 OR e < 0 THEN 'negative coordinate'
-        WHEN e < s THEN 'end before start'
-        WHEN e = s THEN 'zero width'
-        WHEN e > 2147483647 THEN 'coordinate exceeds the cgranges 32-bit range'
-        ELSE NULL END AS reason FROM peek_raw`);
     await conn.query(`CREATE OR REPLACE TEMP TABLE peek_valid AS
       SELECT *, row_number() OVER ()::INTEGER AS rid, e - s AS w,
         fid::VARCHAR || ':' || chrom AS seq,
-        regexp_full_match(chrom, '(chr)?([0-9]+|X|Y|M|MT)', 'i') AS main,
-        duckhts_contig_key(chrom) AS ckey
-      FROM peek_checked WHERE reason IS NULL`);
+        regexp_full_match(chrom, '(chr)?([0-9]+|X|Y|M|MT)', 'i') AS main
+      FROM (SELECT fid, trim(raw_chrom) AS chrom, ckey, s, e, name
+        FROM peak WHERE reason IS NULL)`);
     await conn.query(`SELECT duckhts_cgranges_create('peek')`);
     indexed = true;
     await conn.query(`SELECT bool_and(duckhts_cgranges_add('peek', seq, s, e, rid)) FROM peek_valid`);
@@ -59,9 +39,6 @@ export async function peek(conn, { peaks }) {
         count(*) FILTER (WHERE starts_with(lower(chrom), 'chr')) AS withChr,
         count(*) FILTER (WHERE duckhts_cgranges_count_overlaps('peek', seq, s, e) > 1) AS overlapping
       FROM peek_valid v JOIN coverage c USING(fid) JOIN duplicates d USING(fid) GROUP BY v.fid ORDER BY v.fid`);
-    const rejected = await rows(conn, `SELECT fid, reason, count(*) AS n,
-        sum(count(*)) OVER (PARTITION BY fid)::BIGINT AS total FROM peek_checked
-      WHERE reason IS NOT NULL GROUP BY fid, reason ORDER BY fid, reason`);
     const perChrom = await rows(conn, `SELECT * FROM (
       SELECT fid, CASE WHEN main THEN chrom ELSE 'other' END AS chrom,
         CASE WHEN main THEN ckey ELSE 'other' END AS key, count(*) AS n
@@ -93,21 +70,22 @@ export async function peek(conn, { peaks }) {
       UNION ALL SELECT fid, chrom, s, e, name, w, 'largest', largest FROM ranked WHERE largest <= 5
       ORDER BY fid, kind, rank`);
 
-    const results = peaks.map((file, fid) => {
+    const results = files.map((file) => {
+      const { fid } = file;
       const stats = summaries.find((s) => s.fid === fid) ?? {
         n: 0, min: null, median: null, mean: null, max: null, sum: 0, mergedBp: 0,
         duplicates: 0, chromosomes: 0, offMain: 0, over100kb: 0, withChr: 0, overlapping: 0,
       };
-      return { ...stats, fid, label: file.label, error: errors.get(fid) ?? null,
-        rejectedCount: rejected.find((r) => r.fid === fid)?.total ?? 0,
+      return { ...stats, fid, label: file.label, error: file.error,
+        rejectedCount: file.rejectedCount,
         chromStyle: stats.n === 0 ? null : stats.withChr === stats.n ? "chr" : stats.withChr === 0 ? "bare" : "mixed",
-        rejected: rejected.filter((r) => r.fid === fid), perChrom: perChrom.filter((r) => r.fid === fid),
+        rejected: file.rejected, perChrom: perChrom.filter((r) => r.fid === fid),
         histogram: histogram.filter((r) => r.fid === fid), extremes: extremes.filter((r) => r.fid === fid) };
     });
     return { results, aligned };
   } finally {
     if (indexed) await conn.query(`SELECT duckhts_cgranges_destroy('peek')`);
-    for (const table of ["peek_raw", "peek_checked", "peek_valid", "peek_span", "peek_bins"]) {
+    for (const table of ["peek_valid", "peek_span", "peek_bins"]) {
       await conn.query(`DROP TABLE IF EXISTS ${table}`);
     }
   }

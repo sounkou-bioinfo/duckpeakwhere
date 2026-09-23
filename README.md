@@ -78,7 +78,46 @@ without changing raw-name statistics.
 no JavaScript parser, interval algorithm, sampling or annotation
 dependency.
 
-### PeakPeek compatibility
+### Shared peak-file rules
+
+Both views use [`src/peaks.js`](src/peaks.js): one `read_bed` scan per
+file into `peak(fid, label, raw_chrom, ckey, s, e, name, reason)`. Only
+rows without a rejection reason reach either analysis. Errors are per
+file; a failed read contributes no rows and does not prevent other files
+from being analysed. Both views report the same rejected counts and
+reasons.
+
+The provenance is peakwhere at `f40a673` (`src/peaks.js`, SPEC §5/§9,
+ADR-0006/0007) and PeakPeek at `4f91069` (SPEC §5/§6,
+ADR-0001/0003/0007/0011):
+
+- BED coordinates are 0-based, half-open. Reject missing/non-integer
+  coordinates, negative coordinates, end before start, and zero width.
+  Both upstreams reject these; the distinct reason names follow
+  PeakPeek. Duplicates are retained in both views.
+- Trim chromosome names for analysis; retain the reader’s original
+  spelling in `raw_chrom`. Where matches contigs through
+  `duckhts_contig_key`, as do Peek’s aligned charts. Peek’s per-file
+  statistics preserve the trimmed spelling, so `chr1` and `1` remain
+  distinct there (PeakPeek ADR-0007).
+- Coordinates must fit cgranges’ signed 32-bit range
+  (`end ≤ 2147483647`); larger rows are rejected in both views, even
+  though upstream JavaScript permits larger integers.
+- DuckHTS supplies BED-family parsing. Whole-number scientific notation
+  accepted by upstream peakwhere is rejected here because `read_bed`
+  returns NULL. A row with fewer than three fields fails its entire
+  file, rather than producing upstream’s per-line rejection. CSV/TSV
+  header mapping, raw-line diagnostics and decimal optional fields await
+  [DuckHTS \#250](https://github.com/RGenomicsETL/duckhts/issues/250).
+  We do not implement a second parser. Known-limit tests pin these
+  boundaries.
+
+W2 centre counts are checked against the committed upstream peakwhere
+CSV and our head-to-head receipt on every timing run. PeakPeek
+statistics are checked only against its own hand-worked fixture and
+full-file SPEC expectations.
+
+## PeakPeek compatibility
 
 The reference is PeakPeek commit
 [`4f91069`](https://github.com/seandavi/peakpeek/tree/4f91069acc009b6b0d83dced8d7a860462344fed),
