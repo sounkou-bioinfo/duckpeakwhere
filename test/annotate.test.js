@@ -27,7 +27,8 @@ test("signed DuckHTS loads with unsigned extensions disallowed", async () => {
   assert.match(info.platform, /^wasm_/);
 });
 
-for (const annotation of ["fixture.gff3", "fixture.gtf"]) {
+// ucsc.gtf: GTF 2.2 names its UTRs 5UTR and 3UTR, as UCSC exports do.
+for (const annotation of ["fixture.gff3", "fixture.gtf", "ucsc.gtf"]) {
   test(`${annotation}: peak centres`, async () => {
     const { results } = await annotate({ annotation: fixture(annotation), peaks });
     const [r] = results;

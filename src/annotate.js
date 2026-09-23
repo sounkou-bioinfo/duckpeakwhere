@@ -75,6 +75,7 @@ function featureSql(format, url) {
   const kind = `CASE lower(feature)
       WHEN 'exon' THEN 'exon' WHEN 'cds' THEN 'cds'
       WHEN 'five_prime_utr' THEN 'utr5' WHEN 'three_prime_utr' THEN 'utr3'
+      WHEN '5utr' THEN 'utr5' WHEN '3utr' THEN 'utr3'
       WHEN 'utr' THEN 'utr' END`;
   // Attributes are extracted per key and only on the rows that use that key, rather
   // than parsing every row into a MAP: on GENCODE the MAP cost ~8 of ~9 s natively.
