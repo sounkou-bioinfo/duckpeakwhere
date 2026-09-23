@@ -113,11 +113,13 @@ export function mountSqlConsole(root, api, selection, { onBusy = () => {} } = {}
     root.open = true;
     input.value = sql;
     input.focus();
+    input.setSelectionRange(0, 0);
+    input.scrollTop = 0;
   };
   function refresh() {
     const placeholder = document.createElement("option");
     placeholder.value = "";
-    placeholder.textContent = "Examples";
+    placeholder.textContent = "Pick one…";
     select.replaceChildren(placeholder, ...api.examples(selection()).map(({ id, label }) => {
       const option = document.createElement("option");
       option.value = id;
@@ -150,9 +152,18 @@ export function mountSqlConsole(root, api, selection, { onBusy = () => {} } = {}
       const body = table.createTBody();
       for (const values of rows) {
         const row = body.insertRow();
-        for (const value of values) row.insertCell().textContent = display(value);
+        for (const value of values) {
+          const cell = row.insertCell();
+          cell.textContent = display(value);
+          if (value == null) cell.className = "null";
+          else if (typeof value === "number" || typeof value === "bigint") cell.className = "num";
+        }
       }
     }
+    // Numeric columns align right, header included.
+    rows[0]?.forEach((value, j) => {
+      if (typeof value === "number" || typeof value === "bigint") table.tHead.rows[0].cells[j].className = "num";
+    });
     find("sql-error").textContent = error ?? "";
     find("sql-status").textContent = error ? "" : `Showing ${rows.length} of ${total}`;
     setBusy(false);

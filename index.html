@@ -57,29 +57,40 @@
           <button id="clear-files" type="button">Clear local files</button>
           <p id="local-status" class="note" role="status">Checking local-file support…</p>
         </div>
-        <div id="chrom-sizes-control">
-          <label>Optional chrom.sizes file <input id="chrom-sizes" type="file" accept=".sizes,.tsv,.txt"></label>
-          <button id="clear-chrom-sizes" type="button">Clear chrom.sizes</button>
-          <p class="caption">Two tab-separated columns, chromosome and positive integer length, no header. Used only when the annotation has no ##sequence-region lengths; does not change peak counts or contig matching.</p>
+        <div id="chrom-sizes-control" class="optional-file">
+          <label>chrom.sizes <span class="hint">optional: a Genome bar for annotations without lengths, like GTF</span>
+            <input id="chrom-sizes" type="file" accept=".sizes,.tsv,.txt"></label>
+          <button id="clear-chrom-sizes" type="button" class="quiet">Clear</button>
         </div>
       </fieldset>
 
       <fieldset id="where-settings">
         <legend>Settings</legend>
-        <p class="caption">Promoter window around the TSS</p>
-        <label>Upstream (bp) <input id="up" type="number" min="0" step="1" value="1000"></label>
-        <label>Downstream (bp) <input id="down" type="number" min="0" step="1" value="1000"></label>
-        <label>Count
-          <select id="mode">
-            <option value="centre">peak centres</option>
-            <option value="bp">peak base pairs</option>
-          </select>
-        </label>
-        <label class="inline"><input id="summits" type="checkbox"> Use narrowPeak summits for centre counting</label>
-        <p class="caption">Identified by .narrowPeak (also .gz or .bgz); unavailable or out-of-range summits use the midpoint. BED/broadPeak and base-pair counting are unchanged.</p>
-        <label class="inline"><input id="coding" type="checkbox"> Protein-coding transcripts only</label>
-        <label class="inline"><input id="downstream-enabled" type="checkbox"> Include Downstream (past TES)</label>
-        <label>Post-TES window (bp) <input id="downstream-window" type="number" min="0" step="1" value="1000"></label>
+        <div class="group">
+          <p class="caption">Promoter around the TSS</p>
+          <label>Upstream (bp) <input id="up" type="number" min="0" step="1" value="1000"></label>
+          <label>Downstream (bp) <input id="down" type="number" min="0" step="1" value="1000"></label>
+        </div>
+        <div class="group">
+          <label>Count
+            <select id="mode">
+              <option value="centre">peak centres</option>
+              <option value="bp">peak base pairs</option>
+            </select>
+          </label>
+          <label class="inline dependent"><input id="summits" type="checkbox">
+            <span>Use the summit as the centre
+              <small class="hint">narrowPeak only; other files, and missing summits, use the midpoint</small></span></label>
+        </div>
+        <div class="group">
+          <label class="inline"><input id="coding" type="checkbox"> Protein-coding transcripts only</label>
+        </div>
+        <div class="group">
+          <label class="inline"><input id="downstream-enabled" type="checkbox">
+            <span>Downstream category
+              <small class="hint">a window past each transcript end, before intergenic</small></span></label>
+          <label class="dependent">Window past the TES (bp) <input id="downstream-window" type="number" min="0" step="1" value="1000"></label>
+        </div>
       </fieldset>
 
       <button id="run" type="submit" disabled>Starting DuckDB…</button>
@@ -92,11 +103,16 @@
         <p id="summary" class="note"></p>
         <ul id="warnings"></ul>
         <div class="scroll"><table id="table"></table></div>
-        <button id="where-tsv" type="button">Download summary TSV</button>
-        <button id="where-svg" type="button">Download chart SVG</button>
+        <div class="actions">
+          <button id="where-tsv" type="button" class="quiet">Download TSV</button>
+          <button id="where-svg" type="button" class="quiet">Download SVG</button>
+        </div>
         <details class="executed-sql"><summary>Show the SQL</summary>
-          <pre></pre><button type="button" data-action="copy">Copy</button>
-          <button type="button" data-action="open">Open in console</button>
+          <pre></pre>
+          <div class="actions">
+            <button type="button" data-action="copy" class="quiet">Copy</button>
+            <button type="button" data-action="open" class="quiet">Open in console</button>
+          </div>
         </details>
       </div>
       <div id="peek-results" hidden>
@@ -120,20 +136,28 @@
         <h2>Problems and extreme widths</h2>
         <div id="peek-problems"></div>
         <details class="executed-sql"><summary>Show the SQL</summary>
-          <pre></pre><button type="button" data-action="copy">Copy</button>
-          <button type="button" data-action="open">Open in console</button>
+          <pre></pre>
+          <div class="actions">
+            <button type="button" data-action="copy" class="quiet">Copy</button>
+            <button type="button" data-action="open" class="quiet">Open in console</button>
+          </div>
         </details>
       </div>
       <details id="sql-console">
-        <summary>SQL</summary>
-        <label for="sql-examples">Examples</label>
-        <select id="sql-examples"></select>
-        <label for="sql-input">Query</label>
-        <textarea id="sql-input" rows="12" spellcheck="false"></textarea>
-        <button id="sql-run" type="button">Run</button>
-        <pre id="sql-error" role="alert"></pre>
-        <pre id="sql-status" aria-live="polite"></pre>
-        <table id="sql-result" class="sql-result"></table>
+        <summary><span class="title">SQL</span>
+          <span class="subtitle">The tables behind this result are live. Query them, or call DuckHTS on your files.</span></summary>
+        <div class="body">
+          <label class="bar">Examples <select id="sql-examples"></select></label>
+          <label for="sql-input" class="visually-hidden">Query</label>
+          <textarea id="sql-input" rows="10" spellcheck="false" placeholder="SELECT * FROM segment LIMIT 10;"></textarea>
+          <div class="bar">
+            <button id="sql-run" type="button">Run</button>
+            <span class="note"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
+            <pre id="sql-status" aria-live="polite"></pre>
+          </div>
+          <pre id="sql-error" role="alert"></pre>
+          <div class="sql-scroll"><table id="sql-result" class="sql-result"></table></div>
+        </div>
       </details>
     </section>
   </main>
