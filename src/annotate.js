@@ -84,7 +84,7 @@ function featureSql(format, url) {
     : `nullif(regexp_extract(attributes, '(?:^|;)\\s*${key}=([^;]*)', 1), '')`;
 
   if (format === "gtf") {
-    // GTF links by transcript_id; the type keys are read on exon and transcript lines.
+    // GTF links transcripts and exon spans to gene lines by gene_id.
     // A transcript is a transcript_id on one chromosome and strand: some GTFs (UCSC's)
     // reuse an id for copies at other loci, which must not merge into one span.
     const tx = "transcript_id || chr(31) || ckey || strand";
@@ -93,7 +93,8 @@ CREATE OR REPLACE TEMP TABLE feature AS
 SELECT seqname, ckey, s, e, strand, type, kind,
        CASE WHEN kind IS NOT NULL OR type = 'transcript' THEN ${attr("transcript_id")} END AS transcript_id,
        CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr(TRANSCRIPT_TYPE)} END AS transcript_type,
-       CASE WHEN kind = 'exon' OR type = 'transcript' THEN ${attr(GENE_TYPE)} END AS gene_type
+       CASE WHEN kind = 'exon' OR type IN ('transcript', 'gene') THEN ${attr(GENE_TYPE)} END AS gene_type,
+       CASE WHEN kind = 'exon' OR type IN ('transcript', 'gene') THEN ${attr("gene_id")} END AS gene_id
 FROM (SELECT seqname, duckhts_contig_key(seqname) AS ckey, start - 1 AS s, "end" AS e, strand,
              lower(feature) AS type, ${kind} AS kind, attributes
       FROM ${reader}(${lit(url)}, scan_mode := 'sequential'));
@@ -103,16 +104,21 @@ FROM feature WHERE kind IS NOT NULL AND transcript_id IS NOT NULL;
 CREATE OR REPLACE TEMP TABLE tx AS
 WITH exon_span AS (
   SELECT ${tx} AS tx, ckey, strand, min(s) AS s, max(e) AS e,
-         any_value(coalesce(transcript_type, gene_type)) AS biotype
+         any_value(gene_id) AS gene_id, any_value(coalesce(transcript_type, gene_type)) AS biotype
   FROM feature WHERE kind = 'exon' AND transcript_id IS NOT NULL GROUP BY ALL
 ), line AS (
   SELECT ${tx} AS tx, any_value(s) AS s, any_value(e) AS e,
-         any_value(coalesce(transcript_type, gene_type)) AS biotype
+         any_value(gene_id) AS gene_id, any_value(coalesce(transcript_type, gene_type)) AS biotype
   FROM feature WHERE type = 'transcript' GROUP BY 1
+), gene AS (
+  SELECT gene_id, ckey, strand, any_value(gene_type) AS biotype
+  FROM feature WHERE type = 'gene' AND gene_id IS NOT NULL GROUP BY ALL
 )
 SELECT x.tx, x.ckey, coalesce(l.s, x.s) AS s, coalesce(l.e, x.e) AS e, x.strand,
-       coalesce(l.biotype, x.biotype) AS biotype
-FROM exon_span x LEFT JOIN line l USING (tx);`;
+       coalesce(l.biotype, x.biotype, g.biotype) AS biotype
+FROM exon_span x LEFT JOIN line l USING (tx)
+LEFT JOIN gene g ON g.gene_id = coalesce(l.gene_id, x.gene_id)
+  AND g.ckey = x.ckey AND g.strand = x.strand;`;
   }
 
   // GFF3 links by ID/Parent. Parts (exon, CDS, UTR) need only Parent. Transcripts and

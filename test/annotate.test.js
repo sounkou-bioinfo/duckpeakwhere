@@ -82,6 +82,22 @@ for (const annotation of ["ensembl.gtf", "ensembl.gff3"]) {
   });
 }
 
+test("GTF gene-line biotypes reach transcripts and exon-only transcripts on their own contig", async () => {
+  for (const proteinCodingOnly of [false, true]) {
+    const { results, meta, warnings } = await annotate({
+      annotation: fixture("gene-types.gtf"),
+      peaks: [{ url: fixture("gene-types.bed"), label: "genes" }],
+      settings: { promoterUpstream: 0, promoterDownstream: 0, proteinCodingOnly },
+    });
+    assert.deepEqual(results[0].counts, {
+      promoter: 0, utr5: 0, utr3: 0, exon: proteinCodingOnly ? 2 : 4,
+      intron: 0, intergenic: proteinCodingOnly ? 2 : 0,
+    });
+    assert.equal(meta.transcripts, proteinCodingOnly ? 2 : 4);
+    assert.ok(!warnings.some((w) => /every transcript was kept/.test(w)));
+  }
+});
+
 // seandavi/peakwhere#27: a transcript_id reused on another chromosome is another transcript.
 test("reused-id.gtf: each copy of a reused transcript_id keeps its own chromosome", async () => {
   const { results } = await annotate({
