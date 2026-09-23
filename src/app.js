@@ -164,6 +164,8 @@ function draw({ results, background, meta, warnings }) {
   );
   $("chart").replaceChildren(
     Plot.plot({
+      width: Math.max(480, ($("chart").clientWidth || 820) - 32),
+      height: 70 + 34 * bars.length,
       marginLeft: 90,
       x: { label: "Share", percent: true, domain: [0, 100] },
       y: { label: null, domain: bars.map((r) => r.label) },
@@ -263,9 +265,10 @@ async function main() {
       await reset;
       const input = request();
       const result = await session.run(isPeek ? "peek" : "where", input);
+      // Shown before drawing so the charts can size themselves to the results column.
+      $("output").hidden = false;
       if (isPeek) drawPeek(result);
       else draw(result);
-      $("output").hidden = false;
       $("status").textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)} s.`;
       document.body.dataset.state = "done";
     } catch (error) {

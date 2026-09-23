@@ -55,7 +55,11 @@ test("summary TSV and SVG downloads contain actual results", async () => {
       assert.match(text, /6217728\t6003019/);
     } else {
       assert.match(text, /<svg/);
-      assert.match(text, /width="900"/);
+      // The export keeps the drawn size: its viewBox width equals its width attribute.
+      const width = Number(/<svg[^>]* width="(\d+(?:\.\d+)?)"/.exec(text)?.[1]);
+      const viewBoxWidth = Number(/<svg[^>]* viewBox="0 0 (\d+(?:\.\d+)?) /.exec(text)?.[1]);
+      assert.ok(width > 0, "exported SVG has a width");
+      assert.equal(viewBoxWidth, width, "viewBox width matches the drawn width");
       assert.match(text, /aria-label="(rect|bar)"/);
       assert.match(text, /CTCF/);
     }
