@@ -1,9 +1,15 @@
-# Independent oracle for the thymus example. It shares no code with the SQL pipeline
+# Independent oracle for the thymus data. It shares no code with the SQL pipeline
 # and uses base R only: read the GFF3 by hand, build every category interval, and give
 # each peak centre the best (lowest) priority among the intervals that contain it.
-# Slow on purpose. Writes test/fixtures/thymus-expected.json.
+# Slow on purpose. Defaults to the bundled chr19 data and expected fixture.
 #
-# Run from the repository root: Rscript test/oracle.R
+# Run from the repository root: Rscript test/oracle.R [annotation.gff3.gz peak-dir output.json]
+
+args <- commandArgs(TRUE)
+stopifnot(length(args) %in% c(0L, 3L))
+annotation <- if (length(args) == 0L) "examples/gencode.vM25.basic.chr19.gff3.gz" else args[1]
+peak_directory <- if (length(args) == 0L) "examples" else args[2]
+output <- if (length(args) == 0L) "test/fixtures/thymus-expected.json" else args[3]
 
 promoter_upstream <- 1000L
 promoter_downstream <- 1000L
@@ -24,7 +30,7 @@ gff_attributes <- function(column) {
   })
 }
 
-lines <- read_gz_lines("examples/gencode.vM25.basic.chr19.gff3.gz")
+lines <- read_gz_lines(annotation)
 lines <- lines[!startsWith(lines, "#")]
 fields <- do.call(rbind, strsplit(lines, "\t", fixed = TRUE))
 gff <- data.frame(
@@ -75,7 +81,7 @@ category_of <- function(chrom, x) {
   if (length(hit) == 0L) 6L else min(hit)
 }
 
-peak_files <- sort(list.files("examples", pattern = "\\.narrowPeak\\.gz$", full.names = TRUE))
+peak_files <- sort(list.files(peak_directory, pattern = "\\.narrowPeak\\.gz$", full.names = TRUE))
 counts <- lapply(peak_files, function(path) {
   peak <- do.call(rbind, strsplit(read_gz_lines(path), "\t", fixed = TRUE))
   s <- as.integer(peak[, 2])
@@ -97,5 +103,5 @@ json <- paste0(
   paste0('    "', names(counts), '": ', vapply(counts, json_counts, "", indent = "    "), collapse = ",\n"),
   "\n  }\n}\n"
 )
-writeLines(json, "test/fixtures/thymus-expected.json", sep = "")
+writeLines(json, output, sep = "")
 invisible(lapply(names(counts), function(n) cat(n, counts[[n]], "\n")))

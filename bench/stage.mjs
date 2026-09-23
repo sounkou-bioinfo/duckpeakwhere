@@ -6,8 +6,8 @@ import { gunzipSync } from "node:zlib";
 
 const manifest = JSON.parse(await readFile("bench/manifest.json", "utf8"));
 const workload = process.argv[2] ?? "W1";
-if (workload !== "W1") throw new Error("Usage: node bench/stage.mjs W1");
-const files = [manifest.native];
+if (!["W1", "W2"].includes(workload)) throw new Error("Usage: node bench/stage.mjs W1|W2");
+const files = [manifest.native, ...(workload === "W2" ? manifest.W2 : [])];
 for (const file of files) {
   let bytes;
   try {

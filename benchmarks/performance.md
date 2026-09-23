@@ -19,14 +19,15 @@ times below for startup-inclusive native and R measurements. ChIPseeker
 performs additional nearest-transcript annotation and has different
 category rules, so this is not an equal-output speedup claim.
 
-| Workload | wasm                  | native-1t             | native-nt             | chipseeker            |
-|:---------|:----------------------|:----------------------|:----------------------|:----------------------|
-| W1       | 0.830 \[0.750–1.195\] | 0.515 \[0.431–0.624\] | 0.384 \[0.361–0.525\] | 3.148 \[2.853–4.453\] |
+| Workload | wasm                     | native-1t             | native-nt             | chipseeker               |
+|:---------|:-------------------------|:----------------------|:----------------------|:-------------------------|
+| W1       | 0.728 \[0.720–0.765\]    | 0.401 \[0.390–0.405\] | 0.370 \[0.368–0.380\] | 2.776 \[2.645–3.009\]    |
+| W2       | 13.623 \[13.568–13.704\] | 9.699 \[9.655–9.758\] | 7.395 \[7.385–7.444\] | 25.782 \[25.746–25.805\] |
 
 W1 contains all 7,220 bundled mouse thymus chr19 peaks in five files,
-against GENCODE M25 basic chr19 (mm10/GRCm38). W2 uses the full versions
-of those same GENCODE and ENCODE files; only workloads with receipts are
-tabulated.
+against GENCODE M25 basic chr19 (mm10/GRCm38). W2 requests the full
+versions of those same GENCODE and ENCODE files. A failed workload has
+no timing entries.
 
 ## Reproduce
 
@@ -38,22 +39,26 @@ rmarkdown installed:
 ``` bash
 node bench/stage.mjs W1
 Rscript bench/run.R W1
+Rscript bench/run.R W2
 make performance
 make readme
 ```
 
 [`bench/manifest.json`](../bench/manifest.json) pins the signed native
-DuckHTS archive URL and SHA-256. Staging verifies the compressed bytes
-on every invocation and extracts to `duckhts.duckdb_extension` (the
-basename determines the init symbol). Downloads stay in ignored
-`bench/.cache/`. [`results.json`](results.json) contains per-run
-receipts, including the discarded warm-up, counts, source/input
-SHA-256s, versions, native statement timings and `/usr/bin/time -v`
-output. Native reports DuckHTS 1.5.2 in `duckdb_extensions()`. That
-version field is blank in wasm, whose release identity is instead
-established by checking the staged artifact against
-`duckhts-manifest.json`’s pinned SHA-256 before every run. Rendering
-reads these receipts; it does not rerun engines or download data.
+DuckHTS archive and all six full-genome input URLs and SHA-256s.
+`bench/run.R` calls the staging script before the workload;
+`node bench/stage.mjs W2` also stages W2 directly. Staging verifies the
+compressed bytes on every invocation and extracts to
+`duckhts.duckdb_extension` (the basename determines the init symbol).
+Downloads stay in ignored `bench/.cache/`.
+[`results.json`](results.json) contains per-run receipts, including the
+discarded warm-up, counts, source/input SHA-256s, versions, native
+statement timings and `/usr/bin/time -v` output. Native reports DuckHTS
+1.5.2 in `duckdb_extensions()`. That version field is blank in wasm,
+whose release identity is instead established by checking the staged
+artifact against `duckhts-manifest.json`’s pinned SHA-256 before every
+run. Rendering reads these receipts; it does not rerun engines or
+download data.
 
 ## Measurement contract
 
@@ -103,42 +108,112 @@ No workload timing is published unless all of its SQL correctness gates
 pass. Every run, including warm-up, is checked. W1 requires the six
 counts for each file to equal `test/fixtures/thymus-expected.json`
 exactly, with zero unmatched peaks; `test/oracle.R` must reproduce that
-fixture byte for byte. ChIPseeker is not required to match SQL: input
-totals, recognized category labels, and repeatability are checked, with
-dropped peaks reported separately. Its disagreement is never used to
-relax the SQL gate.
+fixture byte for byte. W2 requires exact count and unmatched-peak
+agreement among all three SQL engines, across all repetitions, and exact
+count agreement with the independent oracle if it finishes within **120
+seconds**. An oracle timeout is reported explicitly; an oracle error or
+a count mismatch stops the workload. `test/oracle.R` accepts annotation,
+peak-directory and output paths, using the same base-R algorithm as W1.
+A failed workload writes a failure receipt and exits nonzero;
+`make performance` can then render the failure without any partial
+timings. ChIPseeker is not required to match SQL: input totals,
+recognized category labels, and repeatability are checked, with dropped
+peaks reported separately. Its disagreement is never used to relax the
+SQL gate.
+
+The brute-force oracle has a chromosome-scope limit: `category_of()`
+assigns a chromosome absent from its interval list to intergenic, while
+SQL excludes annotation-unmatched peaks. W2 includes 23 such peaks. This
+is an additional reason not to claim independent W2 validation: a
+completed oracle remains subject to exact comparison, with no exception
+for those peaks. The oracle’s chromosome rule is not used as a
+substitute for peakwhere’s tested exclusion rule.
 
 ### W1
 
-Every SQL run exactly matches thymus-expected.json; identical SQL hashes
+Measured/attempted: 2026-09-23 17:44:52 UTC
+
+Oracle: **passed**; limit 600 seconds.
+
+Every SQL run exactly matches thymus-expected.json. Identical SQL hashes
 across engines; ChIPseeker counts stable and input totals verified.
 
-Oracle: passed; limit 600 seconds.
+Input peaks: 7220.
 
 | Engine     | Phase        | Seconds: median \[min–max\] |
 |:-----------|:-------------|:----------------------------|
-| wasm       | partition    | 0.720 \[0.634–1.036\]       |
-| wasm       | count        | 0.137 \[0.110–0.158\]       |
-| wasm       | total        | 0.830 \[0.750–1.195\]       |
-| native-1t  | partition    | 0.472 \[0.371–0.561\]       |
-| native-1t  | count        | 0.062 \[0.040–0.063\]       |
-| native-1t  | total        | 0.515 \[0.431–0.624\]       |
-| native-1t  | process_wall | 0.571 \[0.496–0.688\]       |
-| native-nt  | partition    | 0.326 \[0.310–0.435\]       |
-| native-nt  | count        | 0.058 \[0.051–0.105\]       |
-| native-nt  | total        | 0.384 \[0.361–0.525\]       |
-| native-nt  | process_wall | 0.449 \[0.418–0.647\]       |
-| chipseeker | partition    | 1.484 \[1.275–1.665\]       |
-| chipseeker | count        | 1.873 \[1.518–2.788\]       |
-| chipseeker | total        | 3.148 \[2.853–4.453\]       |
-| chipseeker | process_wall | 10.857 \[9.455–12.493\]     |
+| wasm       | partition    | 0.611 \[0.607–0.643\]       |
+| wasm       | count        | 0.117 \[0.113–0.121\]       |
+| wasm       | total        | 0.728 \[0.720–0.765\]       |
+| native-1t  | partition    | 0.355 \[0.353–0.364\]       |
+| native-1t  | count        | 0.040 \[0.037–0.048\]       |
+| native-1t  | total        | 0.401 \[0.390–0.405\]       |
+| native-1t  | process_wall | 0.454 \[0.439–0.460\]       |
+| native-nt  | partition    | 0.321 \[0.314–0.325\]       |
+| native-nt  | count        | 0.054 \[0.049–0.057\]       |
+| native-nt  | total        | 0.370 \[0.368–0.380\]       |
+| native-nt  | process_wall | 0.431 \[0.422–0.437\]       |
+| chipseeker | partition    | 1.275 \[1.226–1.367\]       |
+| chipseeker | count        | 1.498 \[1.419–1.642\]       |
+| chipseeker | total        | 2.776 \[2.645–3.009\]       |
+| chipseeker | process_wall | 8.289 \[8.260–8.545\]       |
 
 | Engine     | Peak RSS MiB: median \[min–max\] |
 |:-----------|:---------------------------------|
 | wasm       | not measured                     |
-| native-1t  | 178.9 \[178.5–179.5\]            |
-| native-nt  | 327.9 \[295.2–335.9\]            |
-| chipseeker | 1197.9 \[1197.4–1199.1\]         |
+| native-1t  | 178.6 \[177.6–178.9\]            |
+| native-nt  | 335.3 \[331.2–337.9\]            |
+| chipseeker | 1198.4 \[1198.0–1199.3\]         |
+
+### W2
+
+Measured/attempted: 2026-09-23 17:43:21 UTC
+
+Oracle: **timeout**; limit 120 seconds.
+
+No independent counts were obtained.
+
+``` text
+Rscript test/oracle.R bench/.cache/W2/gencode.vM25.basic.annotation.gff3.gz bench/.cache/W2 /tmp/duckpeakwhere-bench-33ffe038b5696a/oracle.json
+exit_status: -9
+stdout: (empty)
+stderr: (empty)
+```
+
+All SQL runs agree exactly; the independent oracle timed out. Identical
+SQL hashes across engines; ChIPseeker counts stable and input totals
+verified.
+
+Input peaks: 221308.
+
+SQL unmatched contigs: `chr4_GL456216_random`, `chrUn_GL456359`,
+`chrUn_GL456370`, `chrUn_GL456393`, `chrUn_JH584304`,
+`chrX_GL456233_random`.
+
+| Engine     | Phase        | Seconds: median \[min–max\] |
+|:-----------|:-------------|:----------------------------|
+| wasm       | partition    | 12.809 \[12.759–12.897\]    |
+| wasm       | count        | 0.808 \[0.784–0.843\]       |
+| wasm       | total        | 13.623 \[13.568–13.704\]    |
+| native-1t  | partition    | 9.235 \[9.176–9.278\]       |
+| native-1t  | count        | 0.476 \[0.464–0.480\]       |
+| native-1t  | total        | 9.699 \[9.655–9.758\]       |
+| native-1t  | process_wall | 9.842 \[9.787–9.899\]       |
+| native-nt  | partition    | 6.987 \[6.979–7.036\]       |
+| native-nt  | count        | 0.408 \[0.399–0.416\]       |
+| native-nt  | total        | 7.395 \[7.385–7.444\]       |
+| native-nt  | process_wall | 7.598 \[7.584–7.638\]       |
+| chipseeker | partition    | 16.297 \[16.229–16.349\]    |
+| chipseeker | count        | 9.496 \[9.397–9.554\]       |
+| chipseeker | total        | 25.782 \[25.746–25.805\]    |
+| chipseeker | process_wall | 31.214 \[31.154–31.246\]    |
+
+| Engine     | Peak RSS MiB: median \[min–max\] |
+|:-----------|:---------------------------------|
+| wasm       | not measured                     |
+| native-1t  | 3297.3 \[3293.1–3298.0\]         |
+| native-nt  | 4903.3 \[4825.6–4934.7\]         |
+| chipseeker | 2142.7 \[2142.2–2143.0\]         |
 
 ## ChIPseeker agreement
 
@@ -181,6 +256,16 @@ Relevant rule differences, checked in the installed ChIPseeker functions
   strand. SQL normalizes contig names and reports unmatched chromosomes;
   ChIPseeker uses TxDb sequence names and may omit centres lacking
   usable features. Such omissions are reported, not imputed.
+
+An untimed W2 diagnostic replay with `options(warn = 1)` reproduced the
+recorded ChIPseeker counts and dropped totals exactly. Its 20 annotation
+warnings came from `.merge_two_Seqinfo_objects`: the peak files contain
+random/unplaced contigs absent from TxDb, while TxDb contains chrM (and,
+for some files, chrY) absent from the peaks. The SQL-unmatched contigs
+are listed above. TxDb construction also warns that stop-codon phase
+values are ignored and genome-version metadata is unavailable; the
+GRCm38 identity here comes from the pinned source provenance, not TxDb
+metadata.
 
 Differences below are **ChIPseeker − SQL**. These are marginal category
 counts, not per-peak concordance: equal totals do not prove the same
@@ -228,15 +313,66 @@ been causally decomposed.
 | All      | intron     | 3227 |       3557 |              330 |
 | All      | intergenic |  913 |       1214 |              301 |
 
-| Mark     | Input | Dropped | Downstream folded to intergenic |
-|:---------|------:|--------:|--------------------------------:|
-| CTCF     |   706 |       0 |                               3 |
-| DNase    |  2195 |       0 |                               6 |
-| H3K27me3 |   605 |       0 |                               1 |
-| H3K36me3 |  2855 |       0 |                              11 |
-| H3K4me3  |   859 |       0 |                               0 |
+| Mark     | Input | SQL unmatched | ChIPseeker dropped | Downstream folded to intergenic |
+|:---------|------:|--------------:|-------------------:|--------------------------------:|
+| CTCF     |   706 |             0 |                  0 |                               3 |
+| DNase    |  2195 |             0 |                  0 |                               6 |
+| H3K27me3 |   605 |             0 |                  0 |                               1 |
+| H3K36me3 |  2855 |             0 |                  0 |                              11 |
+| H3K4me3  |   859 |             0 |                  0 |                               0 |
 
 SQL transcripts: 2303; TxDb transcripts: 2303.
+
+### W2
+
+| Mark     | Category   |    SQL | ChIPseeker | ChIPseeker − SQL |
+|:---------|:-----------|-------:|-----------:|-----------------:|
+| CTCF     | promoter   |   9191 |       5695 |            -3496 |
+| CTCF     | utr5       |     21 |        681 |              660 |
+| CTCF     | utr3       |    384 |        407 |               23 |
+| CTCF     | exon       |    825 |       1395 |              570 |
+| CTCF     | intron     |   5193 |       6069 |              876 |
+| CTCF     | intergenic |   4591 |       5958 |             1367 |
+| DNase    | promoter   |  25018 |      14785 |           -10233 |
+| DNase    | utr5       |     80 |       1441 |             1361 |
+| DNase    | utr3       |   1024 |       1077 |               53 |
+| DNase    | exon       |   1965 |       3239 |             1274 |
+| DNase    | intron     |  21844 |      25378 |             3534 |
+| DNase    | intergenic |  17998 |      22009 |             4011 |
+| H3K27me3 | promoter   |   6976 |       3853 |            -3123 |
+| H3K27me3 | utr5       |     39 |        414 |              375 |
+| H3K27me3 | utr3       |    378 |        407 |               29 |
+| H3K27me3 | exon       |    960 |       1492 |              532 |
+| H3K27me3 | intron     |   4212 |       5536 |             1324 |
+| H3K27me3 | intergenic |   4020 |       4883 |              863 |
+| H3K36me3 | promoter   |   3067 |       1600 |            -1467 |
+| H3K36me3 | utr5       |     96 |        127 |               31 |
+| H3K36me3 | utr3       |   6533 |       6652 |              119 |
+| H3K36me3 | exon       |  13986 |      14362 |              376 |
+| H3K36me3 | intron     |  65384 |      66255 |              871 |
+| H3K36me3 | intergenic |   2407 |       2477 |               70 |
+| H3K4me3  | promoter   |  17291 |       9922 |            -7369 |
+| H3K4me3  | utr5       |     39 |       1244 |             1205 |
+| H3K4me3  | utr3       |    193 |        228 |               35 |
+| H3K4me3  | exon       |    807 |       2211 |             1404 |
+| H3K4me3  | intron     |   3947 |       7217 |             3270 |
+| H3K4me3  | intergenic |   2816 |       4271 |             1455 |
+| All      | promoter   |  61543 |      35855 |           -25688 |
+| All      | utr5       |    275 |       3907 |             3632 |
+| All      | utr3       |   8512 |       8771 |              259 |
+| All      | exon       |  18543 |      22699 |             4156 |
+| All      | intron     | 100580 |     110455 |             9875 |
+| All      | intergenic |  31832 |      39598 |             7766 |
+
+| Mark     | Input | SQL unmatched | ChIPseeker dropped | Downstream folded to intergenic |
+|:---------|------:|--------------:|-------------------:|--------------------------------:|
+| CTCF     | 20220 |            15 |                 15 |                              62 |
+| DNase    | 67929 |             0 |                  0 |                             177 |
+| H3K27me3 | 16586 |             1 |                  1 |                              45 |
+| H3K36me3 | 91474 |             1 |                  1 |                             403 |
+| H3K4me3  | 25099 |             6 |                  6 |                              42 |
+
+SQL transcripts: 81540; TxDb transcripts: 81540.
 
 ## Environment and provenance
 
@@ -247,7 +383,7 @@ the exact compressed files.
 
 ### W1
 
-Measured: 2026-09-23 17:30:04 UTC
+Measured: 2026-09-23 17:44:52 UTC
 
 | Component           | Version                      |
 |:--------------------|:-----------------------------|
@@ -300,3 +436,59 @@ Linux Ubuntu-2404-noble-amd64-base 6.8.0-78-generic #78-Ubuntu SMP PREEMPT_DYNAM
 | examples/thymus_H3K27me3_ENCFF478UYW.chr19.narrowPeak.gz | 720ecc922fa8e6ef19bc32a36eefc2a5f144a4c107182bdd0fd191316a4fbc76 |
 | examples/thymus_H3K36me3_ENCFF853BYO.chr19.narrowPeak.gz | da399745a2af18d1ada09e4f547530f60a90545d241c9c94734dc6e091f12740 |
 | examples/thymus_H3K4me3_ENCFF674JZY.chr19.narrowPeak.gz  | 8b1a40a27f8690de5d64ed9865c75e4bfdeb3ceb3f864e41d36379b1251f04f9 |
+
+### W2
+
+Measured: 2026-09-23 17:43:21 UTC
+
+| Component           | Version                      |
+|:--------------------|:-----------------------------|
+| Node                | v24.14.1                     |
+| duckdb-wasm package | 1.33.1-dev57.0               |
+| wasm DuckDB         | v1.5.4                       |
+| Chromium            | 148.0.7778.96                |
+| wasm platform       | wasm_eh                      |
+| native DuckDB       | v1.5.1                       |
+| DuckHTS             | 1.5.2                        |
+| R                   | R version 4.6.0 (2026-04-24) |
+| Bioconductor        | 3.23                         |
+| ChIPseeker          | 1.48.0                       |
+| txdbmaker           | 1.8.0                        |
+| GenomicFeatures     | 1.64.0                       |
+| GenomicRanges       | 1.64.0                       |
+| IRanges             | 2.46.0                       |
+| rtracklayer         | 1.72.0                       |
+
+Threads: wasm 1; native-1t 1; native-nt 20. Signed DuckHTS loaded with
+`allow_unsigned_extensions=false` in all SQL engines.
+
+``` text
+CPU(s):                               20
+Model name:                           13th Gen Intel(R) Core(TM) i5-13500
+Thread(s) per core:                   2
+Core(s) per socket:                   14
+Socket(s):                            1
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.3 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+Linux Ubuntu-2404-noble-amd64-base 6.8.0-78-generic #78-Ubuntu SMP PREEMPT_DYNAMIC Tue Aug 12 11:34:18 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+```
+
+| File                                                      | SHA256                                                           |
+|:----------------------------------------------------------|:-----------------------------------------------------------------|
+| bench/.cache/W2/gencode.vM25.basic.annotation.gff3.gz     | e8ed48bef6a44fdf0db7c10a551d4398aa341318d00fbd9efd69530593106846 |
+| bench/.cache/W2/thymus_CTCF_ENCFF714WDP.narrowPeak.gz     | 15afa43aab7022c24a5f4324ca0b71203daf3121a9316f9049e5c58c6eab3572 |
+| bench/.cache/W2/thymus_DNase_ENCFF979ULB.narrowPeak.gz    | 2fe1a60dc6412b93e0880601e5822746b7114702e1709423dcdb49a3a3656086 |
+| bench/.cache/W2/thymus_H3K27me3_ENCFF478UYW.narrowPeak.gz | 9faf7f19d7dd80325fb22074b3f0c5f2eeb45a54e389df7e924540fea61b25b6 |
+| bench/.cache/W2/thymus_H3K36me3_ENCFF853BYO.narrowPeak.gz | 014da868e773ac7e0c5f7392ba00592e497eb79acd4cc6254775577b02ffcf4c |
+| bench/.cache/W2/thymus_H3K4me3_ENCFF674JZY.narrowPeak.gz  | ab6da876a876ade8c8467e8a84850d36b42af0df68a0606f077c547f8da5b93a |
