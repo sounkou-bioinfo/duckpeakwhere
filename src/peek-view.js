@@ -49,7 +49,7 @@ function charts({ results, aligned }) {
     ...bin, file: label(r.fid), value: percentWidth ? bin.n / r.n * 100 : bin.n,
   })));
   $("width-chart").replaceChildren(...(files.length ? [Plot.plot({
-    width: 900, height: 320, marginLeft: 70,
+    width: Math.max(480, $("output").clientWidth || 820), height: 300, marginLeft: 60,
     x: { type: "log", label: "Peak width (bp)", domain: [widths[0].from, widths.at(-1).to] },
     y: { label: percentWidth ? "Peaks in bin (%)" : "Peaks in bin", grid: true }, color,
     marks: [Plot.rectY(widths, { x1: "from", x2: "to", y1: 0, y2: "value", fill: "file", fillOpacity: 0.25,
@@ -59,9 +59,10 @@ function charts({ results, aligned }) {
   const chroms = [...new Set(aligned.map((r) => r.chrom))];
   const counts = aligned.map((r) => ({ ...r, file: label(r.fid), value: percentChrom ? r.n / byId.get(r.fid).n * 100 : r.n }));
   $("chrom-chart").replaceChildren(...(files.length ? [Plot.plot({
-    width: 900, height: Math.max(240, 160 * files.length), marginLeft: 70, marginRight: 170,
+    width: Math.max(480, $("output").clientWidth || 820), height: Math.max(200, 90 * files.length),
+    marginLeft: 60, marginRight: 110,
     x: { label: "Chromosome (aligned names)", domain: chroms },
-    y: { label: percentChrom ? "Peaks (%)" : "Peaks", grid: true },
+    y: { label: percentChrom ? "Peaks (%)" : "Peaks", grid: true, ticks: 2 },
     fy: { domain, label: null }, color,
     marks: [Plot.barY(counts, { x: "chrom", y: "value", fy: "file", fill: "file", tip: true,
       title: (d) => `${d.file}: ${d.chrom}, ${d.n} peaks` })],
@@ -71,9 +72,10 @@ function charts({ results, aligned }) {
     $(`${id}-svg`).onclick = () => {
       const svg = $(`${id}-chart`).querySelector("svg[viewBox]").cloneNode(true);
       // Plot's HTML legend is outside the SVG; include a visible key in the export.
+      const width = Number(svg.getAttribute("width"));
       const height = Number(svg.getAttribute("height"));
       svg.setAttribute("height", height + 24 * files.length);
-      svg.setAttribute("viewBox", `0 0 900 ${height + 24 * files.length}`);
+      svg.setAttribute("viewBox", `0 0 ${width} ${height + 24 * files.length}`);
       files.forEach((r, i) => {
         const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
         text.setAttribute("x", "70"); text.setAttribute("y", String(height + 18 + i * 24));

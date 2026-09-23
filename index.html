@@ -10,26 +10,34 @@
   <script type="module" src="src/app.js"></script>
 </head>
 <body>
+  <header class="site">
+    <div class="brand">
+      <img src="man/figures/logo.svg" alt="" width="52" height="60">
+      <div>
+        <h1>duckpeakwhere</h1>
+        <p class="tagline">Genomics tools as SQL, in your browser</p>
+      </div>
+    </div>
+    <nav>
+      <span class="badge" title="Local files are read in place; the page makes no requests outside this site.">Nothing leaves this tab</span>
+      <a href="https://github.com/sounkou-bioinfo/duckpeakwhere">Source</a>
+      <a href="https://github.com/RGenomicsETL/duckhts">DuckHTS</a>
+    </nav>
+  </header>
   <main>
-    <header>
-      <h1>duckpeakwhere</h1>
-      <p>Where do your peaks land? Peaks are split into promoter, UTR, exon, intron and
-        intergenic space by SQL over <a href="https://github.com/RGenomicsETL/duckhts">DuckHTS</a>,
-        running in DuckDB inside this tab. A port of
-        <a href="https://github.com/seandavi/peakwhere">peakwhere</a> by Sean Davis.
-        <strong>Peek</strong> checks widths, chromosome distribution and problems without an annotation,
-        following his <a href="https://github.com/seandavi/peakpeek">PeakPeek</a>.</p>
-      <p class="note">Local files stay in this browser; nothing is uploaded. Bundled examples load from this site.
-        <a href="https://github.com/sounkou-bioinfo/duckpeakwhere#local-files">Local-file support and the development build</a>.</p>
-    </header>
-
+    <p class="lede">Where do your peaks land, and what is in these files? htslib reads the
+      formats, <a href="https://github.com/RGenomicsETL/duckhts">DuckHTS</a> does the interval
+      work and DuckDB runs the rest, all inside this tab.</p>
     <form id="form">
-      <label>View <select id="view">
-        <option value="where">Where — genomic annotation</option>
-        <option value="peek">Peek — peak-file sanity check</option>
-      </select></label>
-      <p id="peek-help" class="note" hidden>Peek reads BED / narrowPeak / broadPeak (plain or gzip),
-        on 0-based half-open coordinates. No annotation is needed. CSV/TSV tables are not supported.</p>
+      <div class="view">
+        <label for="view">View</label>
+        <select id="view">
+          <option value="where">Where: genomic annotation</option>
+          <option value="peek">Peek: peak-file check</option>
+        </select>
+      </div>
+      <p id="peek-help" class="note" hidden>BED, narrowPeak or broadPeak; plain, gzip or bgzip.
+        No annotation needed.</p>
       <fieldset id="files">
         <legend>Data</legend>
         <label>Dataset <select id="dataset"></select></label>
@@ -38,11 +46,11 @@
           <div id="peaks" class="checks"></div>
         </div>
         <div id="local-files" hidden>
-          <label class="drop" id="annotation-drop">Drop an annotation here or choose one (GFF3 / GTF, optionally gzipped)
+          <label class="drop" id="annotation-drop">Annotation: GFF3 or GTF, plain, gzip or bgzip
             <input id="local-annotation" type="file" accept=".gff,.gff3,.gtf,.gz">
             <span id="annotation-name">No annotation selected</span>
           </label>
-          <label class="drop" id="peaks-drop">Drop peak files here or choose them (BED / narrowPeak / broadPeak, optionally gzipped)
+          <label class="drop" id="peaks-drop">Peak files: BED, narrowPeak or broadPeak, plain, gzip or bgzip
             <input id="local-peaks" type="file" multiple accept=".bed,.narrowPeak,.broadPeak,.gz">
             <span id="peak-names">No peak files selected</span>
           </label>
@@ -52,9 +60,10 @@
       </fieldset>
 
       <fieldset id="where-settings">
-        <legend>Where settings</legend>
-        <label>Promoter upstream (bp) <input id="up" type="number" min="0" step="1" value="1000"></label>
-        <label>Promoter downstream (bp) <input id="down" type="number" min="0" step="1" value="1000"></label>
+        <legend>Settings</legend>
+        <p class="caption">Promoter window around the TSS</p>
+        <label>Upstream (bp) <input id="up" type="number" min="0" step="1" value="1000"></label>
+        <label>Downstream (bp) <input id="down" type="number" min="0" step="1" value="1000"></label>
         <label>Count
           <select id="mode">
             <option value="centre">peak centres</option>
@@ -77,14 +86,11 @@
       </div>
       <div id="peek-results" hidden>
         <h2>Peek summary</h2>
-        <p class="note">Widths = end − start. Duplicates are counted, not dropped.
-          Merged bp joins touching and overlapping intervals per original chromosome name.
-          Chromosome charts align aliases (chr1 / 1, M / MT); statistics keep names distinct.</p>
+        <p class="note">Width is end − start. Duplicates are counted, not dropped; merged bp joins touching and overlapping peaks.</p>
         <p class="note" id="peek-limits">DuckHTS exposes parsed BED rows, not raw-line diagnostics:
           skipped-line counts, original line numbers/text, scientific-notation coordinates and
-          signal/p/q ranges are unavailable. A short row can fail the whole file. Only coordinates
-          through 2,147,483,647 are supported by the overlap kernel.
-          <a href="https://github.com/sounkou-bioinfo/duckpeakwhere#peakpeek-compatibility">Compatibility details</a>.</p>
+          signal/p/q ranges are unavailable. A short row can fail the whole file.
+          <a href="https://github.com/sounkou-bioinfo/duckpeakwhere/blob/main/docs/peakpeek.md">Compatibility with PeakPeek</a>.</p>
         <div class="scroll"><table id="peek-table"></table></div>
         <button id="peek-tsv" type="button">Download summary TSV</button>
         <h2>Width distribution</h2>
@@ -101,5 +107,10 @@
       </div>
     </section>
   </main>
+  <footer class="site">
+    A port of <a href="https://github.com/seandavi/peakwhere">peakwhere</a> and
+    <a href="https://github.com/seandavi/peakpeek">PeakPeek</a> by Sean Davis.
+    Example data from GENCODE and ENCODE. MIT licensed.
+  </footer>
 </body>
 </html>
