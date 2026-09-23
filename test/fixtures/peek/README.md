@@ -1,7 +1,7 @@
 # PeakPeek oracle
 
 `expected.json` transcribes PeakPeek's independently worked answers at
-[`4f91069`](https://github.com/seandavi/peakpeek/tree/4f91069acc009b6b0d83dced8d7a860462344fed):
+[`a05b661`](https://github.com/seandavi/peakpeek/tree/a05b6615b1c51c41781b6a1f2081868fbc2b711e):
 `examples/fixture.js`, `tests/stats.test.js`, and `SPEC.md` §2/§7. The full ENCODE
 means are rounded in that spec; tests also compare the exact mean to its stated
 sum divided by count. The fixture's histogram counts come from that revision's

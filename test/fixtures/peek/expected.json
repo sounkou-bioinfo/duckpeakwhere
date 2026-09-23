@@ -1,5 +1,5 @@
 {
-  "source": "seandavi/peakpeek@4f91069acc009b6b0d83dced8d7a860462344fed: examples/fixture.js, tests/stats.test.js, SPEC.md sections 2 and 7, ADRs 0001/0003/0004/0006/0007/0011",
+  "source": "seandavi/peakpeek@a05b6615b1c51c41781b6a1f2081868fbc2b711e: examples/fixture.js, tests/stats.test.js, SPEC.md sections 2 and 7, ADRs 0001/0003/0004/0006/0007/0011",
   "fixture": {
     "n": 9, "min": 1, "median": 100, "mean": 195.66666666666666, "max": 1000,
     "sum": 1761, "mergedBp": 1611, "duplicates": 1, "chromStyle": "chr",

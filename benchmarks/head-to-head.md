@@ -78,15 +78,13 @@ timed run and warm-up, including native replay. This is independent
 upstream peakwhere agreement; it is not a claim that the separate W2 R
 oracle finished. That oracle’s timeout remains recorded in
 [performance.md](performance.md). PeakPeek expectations are still its
-own SPEC and tests recorded at `4f91069`, not outputs from this port.
-The expected file is unchanged. That recorded revision could not be
-re-resolved: the supplied shallow checkout is at `a05b661`, and GitHub’s
-commit endpoint returns HTTP 422 for the full
-`4f91069acc009b6b0d83dced8d7a860462344fed` SHA. The available upstream
-hand fixture’s original BED, accepted count, widths, coverage,
-duplicates, chromosome style and per-chromosome counts independently
-match the retained fixture. Revalidating the recorded pin itself
-requires an archived checkout.
+own SPEC and tests at `a05b661`
+([a05b6615b1c51c41781b6a1f2081868fbc2b711e](https://github.com/seandavi/peakpeek/tree/a05b6615b1c51c41781b6a1f2081868fbc2b711e)),
+not outputs from this port. The expected file’s values were re-checked
+against that commit: the fixture expectations against
+`examples/fixture.js` and the five thymus rows against `SPEC.md` §2. (An
+earlier revision of this report cited a PeakPeek commit `4f91069` that
+does not exist; it was a recording error, corrected here.)
 
 ## SQL decisions and measured effects
 

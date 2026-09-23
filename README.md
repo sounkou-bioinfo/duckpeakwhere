@@ -88,7 +88,7 @@ from being analysed. Both views report the same rejected counts and
 reasons.
 
 The provenance is peakwhere at `f40a673` (`src/peaks.js`, SPEC §5/§9,
-ADR-0006/0007) and PeakPeek at `4f91069` (SPEC §5/§6,
+ADR-0006/0007) and PeakPeek at `a05b661` (SPEC §5/§6,
 ADR-0001/0003/0007/0011):
 
 - BED coordinates are 0-based, half-open. Reject missing/non-integer
@@ -135,7 +135,7 @@ full-file SPEC expectations.
 ## PeakPeek compatibility
 
 The reference is PeakPeek commit
-[`4f91069`](https://github.com/seandavi/peakpeek/tree/4f91069acc009b6b0d83dced8d7a860462344fed),
+[`a05b661`](https://github.com/seandavi/peakpeek/tree/a05b6615b1c51c41781b6a1f2081868fbc2b711e),
 its `SPEC.md`, tests and accepted ADRs. This is a BED-family statistics
 port, not a replacement for PeakPeek’s complete input parser.
 
