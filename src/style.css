@@ -33,6 +33,10 @@ label.inline { flex-direction: row; align-items: center; gap: 0.4rem; }
 .checks { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; width: 100%; }
 input[type="number"] { width: 7rem; }
 select, input { font: inherit; }
+[hidden] { display: none !important; }
+#local-files, #bundled-files { width: 100%; }
+.drop { border: 1px dashed var(--muted); border-radius: 6px; padding: 0.8rem; margin-bottom: 0.75rem; }
+.drop span { overflow-wrap: anywhere; }
 
 button {
   justify-self: start;

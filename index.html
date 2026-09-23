@@ -17,21 +17,30 @@
         intergenic space by SQL over <a href="https://github.com/RGenomicsETL/duckhts">DuckHTS</a>,
         running in DuckDB inside this tab. A port of
         <a href="https://github.com/seandavi/peakwhere">peakwhere</a> by Sean Davis.</p>
-      <p class="note">This demo runs on the bundled example files only. DuckHTS can't yet read
-        files dropped on the page
-        (<a href="https://github.com/RGenomicsETL/duckhts/issues/246">duckhts#246</a>).</p>
+      <p class="note">Local files stay in this browser; nothing is uploaded. Bundled examples load from this site.
+        <a href="https://github.com/sounkou-bioinfo/duckpeakwhere#local-files">Local-file support and the development build</a>.</p>
     </header>
 
     <form id="form">
-      <fieldset>
+      <fieldset id="files">
         <legend>Data</legend>
-        <label>Dataset
-          <select id="dataset"></select>
-        </label>
-        <label>Annotation
-          <select id="annotation"></select>
-        </label>
-        <div id="peaks" class="checks"></div>
+        <label>Dataset <select id="dataset"></select></label>
+        <div id="bundled-files">
+          <label>Annotation <select id="annotation"></select></label>
+          <div id="peaks" class="checks"></div>
+        </div>
+        <div id="local-files" hidden>
+          <label class="drop" id="annotation-drop">Drop an annotation here or choose one (GFF3 / GTF, optionally gzipped)
+            <input id="local-annotation" type="file" accept=".gff,.gff3,.gtf,.gz">
+            <span id="annotation-name">No annotation selected</span>
+          </label>
+          <label class="drop" id="peaks-drop">Drop peak files here or choose them (BED / narrowPeak / broadPeak, optionally gzipped)
+            <input id="local-peaks" type="file" multiple accept=".bed,.narrowPeak,.broadPeak,.gz">
+            <span id="peak-names">No peak files selected</span>
+          </label>
+          <button id="clear-files" type="button">Clear local files</button>
+          <p id="local-status" class="note" role="status">Checking local-file support…</p>
+        </div>
       </fieldset>
 
       <fieldset>

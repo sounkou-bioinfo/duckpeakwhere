@@ -28,11 +28,17 @@
     };
     await db.registerFileBuffer("registered.bed", new Uint8Array(await blob.arrayBuffer()));
     const core = (await conn.query("SELECT count(*) AS n FROM read_csv('registered.bed', comment = '#')")).toArray();
-    return {
-      coreReader: Number(core[0].n),
-      registered: await attempt("registered.bed"),
-      blobUrl: await attempt(URL.createObjectURL(blob)),
-    };
+    const url = URL.createObjectURL(blob);
+    try {
+      return {
+        coreReader: Number(core[0].n),
+        registered: await attempt("registered.bed"),
+        blobUrl: await attempt(url),
+      };
+    } finally {
+      URL.revokeObjectURL(url);
+      await db.dropFile("registered.bed");
+    }
   };
   window.databaseInfo = async () => {
     const { conn, platform, version } = await ready;

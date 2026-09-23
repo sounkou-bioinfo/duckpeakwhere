@@ -87,7 +87,8 @@ The rules are peakwhere's:
 - The genome background comes from GFF3 `##sequence-region` lengths.
 
 The page makes no requests outside its own origin. duckdb-wasm, Observable Plot and the
-signed DuckHTS builds are served from `vendor/`.
+DuckHTS builds are served from `vendor/`. The default build is community-signed and
+loads with unsigned extensions disallowed.
 
 ## The same SQL, outside the browser
 
@@ -152,14 +153,45 @@ performance <- jsonlite::read_json("benchmarks/results.json", simplifyVector = F
 knitr::kable(headline(performance), row.names = FALSE)
 ```
 
+## Local files
+
+Choose **Local files**, then pick or drop one GFF3/GTF annotation and one or more
+BED/narrowPeak/broadPeak files. Plain and gzip inputs use the same DuckHTS readers as
+the bundled examples. Files stay in the browser: `localFileUrl` creates a `blob:` URL
+for htslib, without uploading or registering a DuckDB virtual file. Each run keeps its
+URLs alive through all queries and revokes them on success or failure. Selected files
+remain available for reruns; **Clear local files** or choosing a bundled dataset releases
+the selection. The original annotation filename identifies GTF even though the URL has
+no suffix; headers and gzip decoding go through DuckHTS.
+
+**Signing gap:** the pinned signed DuckHTS 1.5.2 build cannot read `blob:` URLs
+([duckhts#246](https://github.com/RGenomicsETL/duckhts/issues/246),
+[PR #248](https://github.com/RGenomicsETL/duckhts/pull/248)). The page probes this once
+and explains the limitation. Bundled examples still work. To test local files, stage
+the separately pinned unsigned build and open **`http://127.0.0.1:8000/?duckhts=dev`**.
+Only this explicit switch sets `allowUnsignedExtensions: true` and loads
+`vendor/duckhts-dev/`; ordinary page loads retain the signed build and disallow unsigned
+extensions. Do not enable this switch for untrusted extension artifacts.
+
+```bash
+npm run stage:dev   # uses authenticated gh to download only the three pinned wasm artifacts
+```
+
+The development artifact's source, commit, platforms and SHA-256 hashes are recorded in
+[`duckhts-dev-manifest.json`](duckhts-dev-manifest.json), independently of the signed
+manifest: CI run **35898454297**, commit `41d5e899b3d2771a47c130ee003a49ddb4a2c4e2`,
+wasm_mvp / wasm_eh / wasm_threads. The staging script verifies every hash before copying
+any build to `vendor/`. GitHub artifacts have finite retention: an archived download tree
+can be staged offline with `npm run stage:dev -- /path/to/artifacts` (one directory per
+artifact, each containing `duckhts.duckdb_extension.wasm`). Missing or changed artifacts
+fail staging; the script never substitutes another run. The `localFileUrl` helper follows PR #248's `{ url, revoke }` contract so the npm export
+can replace it.
+
 ## Limitations
 
-- **Bundled files only.** DuckHTS readers open paths through htslib, which can't see
-  files registered with duckdb-wasm (`registerFileBuffer`, `registerFileHandle`) and
-  has no handler for `blob:` URLs. So a file dropped on the page can't be read yet. The
-  demo reads its example files over same-origin HTTP instead. A test in
-  `test/annotate.test.js` records this, and will fail once it changes. Tracked in
-  [duckhts#246](https://github.com/RGenomicsETL/duckhts/issues/246).
+- **Signed-build local transport.** The limitation test in `test/annotate.test.js`
+  fails when the signed release gains blob support, prompting review of the pin and
+  warning. Registered duckdb-wasm files are not visible to htslib.
 - **DuckDB 1.5 runtime required.** DuckHTS 1.5.2 fails to load on the current stable
   duckdb-wasm (1.32.0, DuckDB v1.4.3), because it registers SQL that calls
   `read_hts_header` before registering that function
@@ -175,10 +207,11 @@ npm ci
 npm run stage    # download the signed DuckHTS wasm builds, checked against duckhts-manifest.json
 npm run vendor   # copy duckdb-wasm and Plot from node_modules into vendor/
 npm run serve    # http://127.0.0.1:8000/
+npm run stage:dev # unsigned build, required for the opt-in local-file tests
 npm test         # headless Chromium, needs a Playwright Chromium install
 ```
 
-`npm run stage` is the only step that uses the network. Once the `duckhts` npm package
+The staging scripts are the only build steps that download extension binaries. Once the `duckhts` npm package
 is published ([duckhts#248](https://github.com/RGenomicsETL/duckhts/pull/248)), it will
 replace both the staging script and `src/duckhts-loader.js`.
 
@@ -192,8 +225,11 @@ replace both the staging script and `src/duckhts-loader.js`.
   against [`thymus-expected.json`](test/fixtures/thymus-expected.json) from
   [`test/oracle.R`](test/oracle.R). The oracle is a slow brute-force implementation in
   base R that shares no code with the SQL.
-- Both check that the signed DuckHTS build loads with unsigned extensions disallowed,
-  and that no request leaves the origin.
+- `test/local-files.test.js` uploads and drops plain/gzipped annotations and peaks,
+  compares against the hand-worked oracle, checks reruns and URL cleanup after errors,
+  and checks the signed-build message and opt-in unsigned setting.
+- Tests check that the signed DuckHTS build loads with unsigned extensions disallowed,
+  and that no request leaves the origin or uploads local data.
 - CI reruns the oracle and fails if its output differs from the committed expectations.
 
 House rules for contributors and agents are in [`AGENTS.md`](AGENTS.md). Example data

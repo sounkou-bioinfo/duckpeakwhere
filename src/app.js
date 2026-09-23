@@ -1,6 +1,7 @@
-// Page wiring: pick bundled files, run the SQL annotation, draw the result.
+// Page wiring: select files, run the SQL annotation, draw the result.
 import * as Plot from "../vendor/plot.js";
 import { openDatabase } from "./db.js";
+import { localFileUrl, supportsLocalFiles } from "./duckhts-loader.js";
 import { annotate, CATEGORIES, CATEGORY_LABELS } from "./annotate.js";
 
 /** Bundled datasets, served from this origin. */
@@ -31,6 +32,31 @@ export const DATASETS = {
 
 const COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#65a30d", "#9ca3af"];
 const $ = (id) => document.getElementById(id);
+const LOCAL_UNSUPPORTED = "This signed DuckHTS build cannot read local files (blob: URLs). Use bundled examples, or stage the pinned development build and open ?duckhts=dev. See DuckHTS #246 / PR #248.";
+let localAnnotation = null;
+let localPeaks = [];
+let localSupported = false;
+
+function clearLocalFiles() {
+  localAnnotation = null;
+  localPeaks = [];
+  $("local-annotation").value = "";
+  $("local-peaks").value = "";
+  $("annotation-name").textContent = "No annotation selected";
+  $("peak-names").textContent = "No peak files selected";
+  $("output").hidden = true;
+}
+
+function selectFiles(kind, files) {
+  if (kind === "annotation") {
+    localAnnotation = files[0] ?? null;
+    $("annotation-name").textContent = localAnnotation?.name ?? "No annotation selected";
+  } else {
+    localPeaks = [...files];
+    $("peak-names").textContent = localPeaks.map((f) => f.name).join(", ") || "No peak files selected";
+  }
+  $("output").hidden = true;
+}
 
 function option(value, text) {
   const el = document.createElement("option");
@@ -40,6 +66,11 @@ function option(value, text) {
 }
 
 function showDataset(key) {
+  $("bundled-files").hidden = key === "local";
+  $("local-files").hidden = key !== "local";
+  $("output").hidden = true;
+  if (key === "local") return;
+  clearLocalFiles();
   const dataset = DATASETS[key];
   $("annotation").replaceChildren(
     ...Object.entries(dataset.annotations).map(([name, url]) => option(url, name)),
@@ -57,14 +88,25 @@ function showDataset(key) {
   );
 }
 
-function request() {
-  const peaks = [...$("peaks").querySelectorAll("input:checked")].map((box) => ({
-    url: new URL(box.value, location.href).href,
-    label: box.dataset.label,
-  }));
+function request(sources) {
+  const isLocal = $("dataset").value === "local";
+  if (isLocal && !localSupported) throw new Error(LOCAL_UNSUPPORTED);
+  if (isLocal && !localAnnotation) throw new Error("Choose an annotation file.");
+  const url = (file) => {
+    const source = localFileUrl(file);
+    sources.push(source);
+    return source.url;
+  };
+  const peaks = isLocal
+    ? localPeaks.map((file) => ({ url: url(file), label: file.name }))
+    : [...$("peaks").querySelectorAll("input:checked")].map((box) => ({
+      url: new URL(box.value, location.href).href,
+      label: box.dataset.label,
+    }));
   if (peaks.length === 0) throw new Error("Choose at least one peak file.");
   return {
-    annotation: new URL($("annotation").value, location.href).href,
+    annotation: isLocal ? url(localAnnotation) : new URL($("annotation").value, location.href).href,
+    annotationName: isLocal ? localAnnotation.name : $("annotation").value,
     peaks,
     settings: {
       promoterUpstream: Number($("up").value),
@@ -109,24 +151,51 @@ function draw({ results, background, meta, warnings }) {
     }),
   );
 
-  const head = `<tr><th>File</th>${CATEGORIES.map((c) => `<th>${CATEGORY_LABELS[c]}</th>`).join("")}<th>Unmatched</th></tr>`;
-  const row = (r) =>
-    `<tr data-label="${r.label}"><th>${r.label}</th>${CATEGORIES.map((c) => `<td data-category="${c}">${r.counts[c].toLocaleString("en")}</td>`).join("")}` +
-    `<td data-category="unmatched">${r.background ? "" : r.unmatched.toLocaleString("en")}</td></tr>`;
-  $("table").innerHTML = head + [...results, ...(background ? [background] : [])].map(row).join("");
+  $("table").replaceChildren();
+  const head = $("table").insertRow();
+  for (const text of ["File", ...CATEGORIES.map((c) => CATEGORY_LABELS[c]), "Unmatched"]) {
+    const cell = document.createElement("th");
+    cell.textContent = text;
+    head.append(cell);
+  }
+  for (const r of [...results, ...(background ? [background] : [])]) {
+    const row = $("table").insertRow();
+    row.dataset.label = r.label;
+    const name = document.createElement("th");
+    name.textContent = r.label;
+    row.append(name);
+    for (const c of [...CATEGORIES, "unmatched"]) {
+      const cell = row.insertCell();
+      cell.dataset.category = c;
+      cell.textContent = c === "unmatched" ? (r.background ? "" : r.unmatched.toLocaleString("en")) : r.counts[c].toLocaleString("en");
+    }
+  }
   $("output").hidden = false;
 }
 
 async function main() {
-  $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)));
+  $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);
+  $("clear-files").addEventListener("click", clearLocalFiles);
+  for (const kind of ["annotation", "peaks"]) {
+    $(kind === "annotation" ? "local-annotation" : "local-peaks").addEventListener("change", (event) => selectFiles(kind, event.target.files));
+    const drop = $(`${kind}-drop`);
+    drop.addEventListener("dragover", (event) => event.preventDefault());
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      if (!$("files").disabled) selectFiles(kind, event.dataTransfer.files);
+    });
+  }
 
   let conn;
   try {
     const opened = await openDatabase();
     conn = opened.conn;
-    $("status").textContent = `DuckDB ${opened.version} (${opened.platform}) with DuckHTS loaded.`;
+    localSupported = await supportsLocalFiles(conn);
+    $("local-status").textContent = localSupported ? "Local files are read in this tab; nothing is uploaded." : LOCAL_UNSUPPORTED;
+    $("status").textContent = `DuckDB ${opened.version} (${opened.platform}) with DuckHTS loaded.` +
+      (new URLSearchParams(location.search).get("duckhts") === "dev" ? " Development build: unsigned extensions enabled." : "");
     $("run").disabled = false;
     $("run").textContent = "Annotate peaks";
   } catch (error) {
@@ -138,16 +207,22 @@ async function main() {
   $("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     $("run").disabled = true;
+    $("files").disabled = true;
+    $("output").hidden = true;
+    delete document.body.dataset.state;
     $("status").textContent = "Annotating…";
     const started = performance.now();
+    const sources = [];
     try {
-      draw(await annotate(conn, request()));
+      draw(await annotate(conn, request(sources)));
       $("status").textContent = `Done in ${((performance.now() - started) / 1000).toFixed(1)} s.`;
       document.body.dataset.state = "done";
     } catch (error) {
       $("status").textContent = error.message;
       document.body.dataset.state = "error";
     } finally {
+      for (const source of sources) source.revoke();
+      $("files").disabled = false;
       $("run").disabled = false;
     }
   });

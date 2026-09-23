@@ -48,7 +48,7 @@ function nonNegativeInt(value, name) {
   return n;
 }
 
-/** GFF3 or GTF, from `##gff-version 3` or the attribute syntax of the name. */
+/** GFF3 or GTF, from `##gff-version 3` or the original filename (blob URLs have no suffix). */
 function annotationFormat(url, headerLines) {
   if (headerLines.some((l) => /^##gff-version\s+3\b/.test(l))) return "gff3";
   if (/\.gtf(\.gz)?$/i.test(url)) return "gtf";
@@ -266,13 +266,14 @@ function countsFrom(rows) {
  * @param {import("@duckdb/duckdb-wasm").AsyncDuckDBConnection} conn with DuckHTS loaded
  * @param {object} request
  * @param {string} request.annotation URL of a GFF3 or GTF file, plain or gzipped
+ * @param {string} [request.annotationName] Original filename, required for GTF blob URLs
  * @param {{url: string, label: string}[]} request.peaks BED/narrowPeak/broadPeak URLs
  * @param {object} [request.settings] see DEFAULT_SETTINGS
  * @param {object} [observer] Optional phase observer for benchmarking.
  * @param {(phase: string) => void} [observer.onPhase]
  * @returns {Promise<{results: object[], background: object | null, meta: object, warnings: string[]}>}
  */
-export async function annotate(conn, { annotation, peaks, settings: given = {} }, { onPhase = () => {} } = {}) {
+export async function annotate(conn, { annotation, annotationName = annotation, peaks, settings: given = {} }, { onPhase = () => {} } = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...given };
   nonNegativeInt(settings.promoterUpstream, "Promoter upstream");
   nonNegativeInt(settings.promoterDownstream, "Promoter downstream");
@@ -289,14 +290,9 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
   onPhase("partition");
   // Header lines: format, assembly and ##sequence-region lengths.
   const headerLines = (
-    await rows(`SELECT line FROM (
-      SELECT column0 AS line FROM read_csv(${lit(annotation)}, header = false, delim = '\\t',
-        quote = '', escape = '', null_padding = true, all_varchar = true, auto_detect = false,
-        columns = {'column0': 'VARCHAR', 'c1': 'VARCHAR', 'c2': 'VARCHAR', 'c3': 'VARCHAR',
-                   'c4': 'VARCHAR', 'c5': 'VARCHAR', 'c6': 'VARCHAR', 'c7': 'VARCHAR', 'c8': 'VARCHAR'})
-      LIMIT 100000) WHERE starts_with(line, '#')`)
-  ).map((r) => r.line);
-  const format = annotationFormat(annotation, headerLines);
+    await rows(`SELECT raw FROM read_hts_header(${lit(annotation)}, format := 'tabix', mode := 'raw') ORDER BY idx`)
+  ).map((r) => r.raw);
+  const format = annotationFormat(annotationName, headerLines);
   const assembly = headerLines.map((l) => ASSEMBLY.exec(l)?.[1]).find(Boolean) ?? null;
   const lengths = headerLines
     .filter((l) => l.startsWith("##sequence-region"))
@@ -307,6 +303,8 @@ export async function annotate(conn, { annotation, peaks, settings: given = {} }
   if (lengths.length) await run(`INSERT INTO chrom_length VALUES ${lengths.join(", ")}`);
 
   await run(featureSql(format, annotation));
+  const [{ features }] = await rows(`SELECT count(*) AS features FROM feature WHERE ckey IS NOT NULL AND s >= 0 AND e > s`);
+  if (Number(features) === 0) throw new Error("No annotation features could be read. Check the annotation format and compression.");
   if (settings.proteinCodingOnly) {
     const [{ typed }] = await rows(`SELECT count(biotype) AS typed FROM tx`);
     if (Number(typed) === 0) {
