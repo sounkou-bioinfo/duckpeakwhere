@@ -4,6 +4,7 @@
 # duckpeakwhere <img src="man/figures/logo.svg" align="right" height="139" alt="duckpeakwhere hex sticker" />
 
 [![test](https://github.com/sounkou-bioinfo/duckpeakwhere/actions/workflows/test.yml/badge.svg)](https://github.com/sounkou-bioinfo/duckpeakwhere/actions/workflows/test.yml)
+[![pages](https://github.com/sounkou-bioinfo/duckpeakwhere/actions/workflows/pages.yml/badge.svg)](https://github.com/sounkou-bioinfo/duckpeakwhere/actions/workflows/pages.yml)
 
 **Where do your peaks land?** Split ChIP-seq, CUT&RUN and ATAC-seq peaks
 into promoter, 5′ UTR, 3′ UTR, exon, intron and intergenic space, with a
@@ -15,6 +16,10 @@ test fixture, but replaces its hand-written GFF3/GTF parser and planned
 overlap engine with SQL over
 [DuckHTS](https://github.com/RGenomicsETL/duckhts) running in
 [duckdb-wasm](https://github.com/duckdb/duckdb-wasm).
+
+**Try it: <https://sounkou-bioinfo.github.io/duckpeakwhere/>**.
+Everything runs in your browser, and the page makes no requests outside
+its own origin.
 
 ## How it works
 
