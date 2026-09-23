@@ -68,7 +68,6 @@ function selectSizes(file) {
   }
   if (!file) {
     $("chrom-sizes").value = "";
-    $("use-chrom-sizes").checked = false;
   }
   $("output").hidden = true;
 }
@@ -130,7 +129,7 @@ function showDataset(key) {
 
 function showView() {
   const isPeek = $("view").value === "peek";
-  for (const id of ["where-settings", "bundled-annotation", "annotation-drop", "where-results"]) $(id).hidden = isPeek;
+  for (const id of ["where-settings", "bundled-annotation", "annotation-drop", "chrom-sizes-control", "where-results"]) $(id).hidden = isPeek;
   $("where-settings").disabled = isPeek;
   $("peek-help").hidden = !isPeek;
   $("peek-results").hidden = !isPeek;
@@ -172,7 +171,6 @@ function request() {
       downstreamEnabled: $("downstream-enabled").checked,
       downstreamWindow: Number($("downstream-window").value),
       useSummits: $("summits").checked,
-      useChromSizes: $("use-chrom-sizes").checked,
     },
   };
 }
@@ -256,7 +254,6 @@ async function main() {
   $("downstream-enabled").checked = DEFAULT_SETTINGS.downstreamEnabled;
   $("downstream-window").value = DEFAULT_SETTINGS.downstreamWindow;
   $("summits").checked = DEFAULT_SETTINGS.useSummits;
-  $("use-chrom-sizes").checked = DEFAULT_SETTINGS.useChromSizes;
   $("dataset").replaceChildren(...Object.entries(DATASETS).map(([key, d]) => option(key, d.name)), option("local", "Local files"));
   $("dataset").addEventListener("change", () => showDataset($("dataset").value));
   showDataset($("dataset").value);
@@ -318,8 +315,7 @@ async function main() {
     try {
       await reset;
       const input = request();
-      if (input.settings?.useChromSizes) {
-        if (!localSizes) throw new Error("Choose a chrom.sizes file or turn off its setting.");
+      if (!isPeek && localSizes) {
         if (!sizesSource) {
           const path = `chrom-sizes-${++nextSizesId}.tsv`;
           await db.registerFileBuffer(path, new Uint8Array(await localSizes.arrayBuffer()));

@@ -145,8 +145,8 @@ Choose **Local files** and pick or drop an annotation and peak files.
 They are read in place through `blob:` URLs, never uploaded.
 
 For annotations without `##sequence-region` lengths, select a
-**chrom.sizes** file and enable **Use chrom.sizes for the Genome
-background**. The file has two tab-separated columns (chromosome and
+**chrom.sizes** file to show the Genome background bar; clearing the
+file removes it. The file has two tab-separated columns (chromosome and
 positive integer length), without a header. DuckDB reads it locally;
 contig names are matched through `duckhts_contig_key`. Only contigs
 present in the annotation contribute to the Genome bar. Annotation

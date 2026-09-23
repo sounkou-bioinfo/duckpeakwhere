@@ -57,6 +57,11 @@
           <button id="clear-files" type="button">Clear local files</button>
           <p id="local-status" class="note" role="status">Checking local-file support…</p>
         </div>
+        <div id="chrom-sizes-control">
+          <label>Optional chrom.sizes file <input id="chrom-sizes" type="file" accept=".sizes,.tsv,.txt"></label>
+          <button id="clear-chrom-sizes" type="button">Clear chrom.sizes</button>
+          <p class="caption">Two tab-separated columns, chromosome and positive integer length, no header. Used only when the annotation has no ##sequence-region lengths; does not change peak counts or contig matching.</p>
+        </div>
       </fieldset>
 
       <fieldset id="where-settings">
@@ -75,10 +80,6 @@
         <label class="inline"><input id="coding" type="checkbox"> Protein-coding transcripts only</label>
         <label class="inline"><input id="downstream-enabled" type="checkbox"> Include Downstream (past TES)</label>
         <label>Post-TES window (bp) <input id="downstream-window" type="number" min="0" step="1" value="1000"></label>
-        <label class="inline"><input id="use-chrom-sizes" type="checkbox"> Use chrom.sizes for the Genome background</label>
-        <label>Optional chrom.sizes file <input id="chrom-sizes" type="file" accept=".sizes,.tsv,.txt"></label>
-        <button id="clear-chrom-sizes" type="button">Clear chrom.sizes</button>
-        <p class="caption">Two tab-separated columns, chromosome and positive integer length, no header. Used only when the annotation has no ##sequence-region lengths; does not change peak counts or contig matching.</p>
       </fieldset>
 
       <button id="run" type="submit" disabled>Starting DuckDB…</button>

@@ -33,7 +33,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
   downstreamEnabled: false,
   downstreamWindow: 1000,
   useSummits: false,
-  useChromSizes: false,
 });
 
 /** A file with more than this fraction of unmatched peaks is not drawn. */
@@ -338,7 +337,7 @@ export async function annotate(conn, { annotation, annotationName = annotation, 
   { onPhase = () => {}, cache, files } = {}) {
   const persistent = !!cache;
   cache ??= {};
-  const settings = { ...DEFAULT_SETTINGS, ...given };
+  const settings = { ...DEFAULT_SETTINGS, useChromSizes: Boolean(chromSizes), ...given };
   nonNegativeInt(settings.promoterUpstream, "Promoter upstream");
   nonNegativeInt(settings.promoterDownstream, "Promoter downstream");
   nonNegativeInt(settings.downstreamWindow, "Post-TES downstream window");

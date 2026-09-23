@@ -18,17 +18,17 @@ test("optional chrom.sizes supplies GTF background and invalidates only length-d
     const base = `${location.origin}/test/fixtures/`;
     const request = { annotation: `${base}gene-types.gtf`,
       peaks: [{ url: `${base}gene-types.bed`, label: "genes" }],
-      chromSizes: `${base}gene-types.chrom.sizes`, settings: { promoterUpstream: 0, promoterDownstream: 0 } };
+      chromSizes: `${base}gene-types.chrom.sizes`, settings: { promoterUpstream: 0, promoterDownstream: 0, useChromSizes: false } };
     const off = await window.runSession("where", request);
     window.takeQueries();
-    request.settings.useChromSizes = true;
+    delete request.settings.useChromSizes;
     const on = await window.runSession("where", request);
     const again = await window.runSession("where", request);
     request.chromSizes = `${base}gene-types-larger.chrom.sizes`;
     const larger = await window.runSession("where", request);
     request.chromSizes = `${base}gene-types-clipped.chrom.sizes`;
     const clipped = await window.runSession("where", request);
-    request.settings.useChromSizes = false;
+    delete request.chromSizes;
     const disabled = await window.runSession("where", request);
     return { off, on, again, larger, clipped, disabled, sql: window.takeQueries().join("\n") };
   });
@@ -82,17 +82,18 @@ test("invalid chrom.sizes lengths fail explicitly and leave the session reusable
   assert.deepEqual(await page.evaluate(() => window.query("SELECT table_name FROM duckdb_tables() WHERE temporary")), []);
 });
 
-test("signed page reads local chrom.sizes through DuckDB and shows the GTF Genome bar only when enabled", async () => {
+test("selecting and clearing chrom.sizes controls the GTF Genome bar", async () => {
   const app = await env.newPage("/");
   await app.waitForFunction(() => !document.querySelector("#run").disabled);
   await app.selectOption("#dataset", "fixture");
   await app.selectOption("#annotation", "test/fixtures/fixture.gtf");
   // fixture.gtf has the same chrF features as fixture.gff3; F=30000 reproduces
   // the hand-worked genomeBackground_bp arithmetic in expected.json.
-  await app.setInputFiles("#chrom-sizes", { name: "fixture.chrom.sizes", mimeType: "text/plain", buffer: Buffer.from("F\t30000\n") });
-  assert.equal(await app.isChecked("#use-chrom-sizes"), false);
-  for (const enabled of [false, true, false, true]) {
-    await app.locator("#use-chrom-sizes").setChecked(enabled);
+  assert.equal(await app.locator("#files #chrom-sizes").count(), 1);
+  assert.equal(await app.locator("#use-chrom-sizes").count(), 0);
+  for (const enabled of [true, false, true]) {
+    if (enabled) await app.setInputFiles("#chrom-sizes", { name: "fixture.chrom.sizes", mimeType: "text/plain", buffer: Buffer.from("F\t30000\n") });
+    else await app.click("#clear-chrom-sizes");
     await app.click("#run");
     await app.waitForSelector('body[data-state="done"] #run:not([disabled])');
     assert.equal(await app.locator('#table [data-label="Genome"]').count(), enabled ? 1 : 0);
